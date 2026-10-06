@@ -35,11 +35,13 @@ UNIT_FACTORS = {
                  "kn": 1.852, "kt": 1.852, "knots": 1.852},
     "accel":    {"g": 1, "m/s^2": 1 / 9.81, "m/s2": 1 / 9.81, "m/s/s": 1 / 9.81, "ms^2": 1 / 9.81},
     "angle":    {"deg": 1, "°": 1, "degrees": 1, "rad": 57.29577951308232},
+    "yaw_rate": {"rad/s": 1, "deg/s": 0.017453292519943295, "°/s": 0.017453292519943295},
+    "wheel_speed": {"km/h": 1, "kph": 1, "kmh": 1, "mph": 1.609344, "m/s": 3.6},
     "pressure": {"bar": 1, "psi": 0.0689476, "kpa": 0.01, "mpa": 10},
     "length":   {"mm": 1, "cm": 10, "m": 1000, "in": 25.4, "inch": 25.4},
     "position": {"m": 1, "km": 1000, "ft": 0.3048},
 }
-CANONICAL_UNIT = {"time": "s", "distance": "m", "speed": "km/h", "accel": "g", "angle": "deg",
+CANONICAL_UNIT = {"yaw_rate": "rad/s", "wheel_speed": "km/h", "time": "s", "distance": "m", "speed": "km/h", "accel": "g", "angle": "deg",
                   "pressure": "bar", "length": "mm", "position": "m", "temperature": "°C",
                   "percent": "%"}
 
@@ -77,7 +79,8 @@ _ZONE_NAMES = {
     "mid":   ("mid", "middle", "centre", "center", "m"),
     "outer": ("outer", "outside", "out", "o"),
 }
-_TYRE_BASES = ("tyre temp", "tire temp", "tyre temperature", "tire temperature", "wheel temp", "ttyre")
+_TYRE_BASES = ("tyre temp", "tire temp", "tyre temperature", "tire temperature", "wheel temp", "ttyre",
+               "tyre tair", "tyre core temp", "tire core temp")
 _ALL_ZONE_WORDS = frozenset(w for names in _ZONE_NAMES.values() for w in names)
 _TYRE_TEMP_EXCLUDE = frozenset({"pressure", "press", "pres", "psi", "bar", "wear", "load", "slip",
                                 "speed", "height", "brake", "air"})
@@ -128,7 +131,7 @@ def _build() -> dict:
                                       "duct", "switch", "light", "fluid"})),
         ChannelDef("steering", "deg", "Steering wheel angle", "angle", sign="+ve steering left",
                    aliases=("steering", "steering angle", "steered angle", "steer angle",
-                            "steering wheel angle", "steer", "swa"),
+                            "steering wheel angle", "steer", "swa", "steerangle"),
                    exclude=frozenset({"torque", "rate", "speed", "velocity", "trim"})),
         ChannelDef("acc_lat", "g", "Lateral acceleration", "accel", sign="+ve in left-hand corners",
                    aliases=("lat accel", "lateral accel", "lateral acceleration", "lateral g",
@@ -145,6 +148,15 @@ def _build() -> dict:
                    aliases=("vert accel", "vertical accel", "vertical acceleration", "g force vert",
                             "vert g", "vert acc", "accel vert", "az"),
                    exclude=frozenset({"offset"})),
+        ChannelDef("yaw_rate", "rad/s", "Yaw rate from a gyro", "yaw_rate", sign="+ve turning left",
+                   aliases=("yaw rate", "yaw velocity", "gyro yaw velocity", "gyro yaw", "roty", "rot y"),
+                   exclude=frozenset({"offset", "est", "estimate"})),
+        ChannelDef("tc_active", "-", "Traction control intervening (0 / 1)", discrete=True,
+                   aliases=("tc", "traction control", "tc active", "tc cut"),
+                   exclude=frozenset({"level", "setting", "map", "mode", "switch"})),
+        ChannelDef("abs_active", "-", "ABS intervening (0 / 1)", discrete=True,
+                   aliases=("abs", "abs active"),
+                   exclude=frozenset({"level", "setting", "map", "mode", "switch"})),
         ChannelDef("pos_x", "m", "Position in the local track plane, x", "position",
                    aliases=("pos x", "position x", "world position x", "x pos", "gps x")),
         ChannelDef("pos_y", "m", "Position in the local track plane, y", "position",
@@ -158,7 +170,7 @@ def _build() -> dict:
     ]
     for c in CORNERS:
         defs.append(ChannelDef(
-            f"tyre_temp_{c}", "°C", f"Tyre temperature {c.upper()}, single sensor", "temperature",
+            f"tyre_temp_{c}", "°C", f"Tyre temperature {c.upper()}, single sensor (surface or core air)", "temperature",
             aliases=_corner_aliases(_TYRE_BASES + ("tyre", "tire"), c),
             exclude=_TYRE_TEMP_EXCLUDE | _ALL_ZONE_WORDS))
         for z in ZONES:
@@ -166,6 +178,12 @@ def _build() -> dict:
                 f"tyre_temp_{c}_{z}", "°C", f"Tyre surface temperature {c.upper()}, {z} zone",
                 "temperature", aliases=_corner_aliases(_TYRE_BASES, c, _ZONE_NAMES[z]),
                 exclude=_TYRE_TEMP_EXCLUDE))
+        defs.append(ChannelDef(
+            f"brake_temp_{c}", "°C", f"Brake disc temperature {c.upper()}", "temperature",
+            aliases=_corner_aliases(("brake temp", "brake temperature", "brake disc temp"), c)))
+        defs.append(ChannelDef(
+            f"wheel_speed_{c}", "km/h", f"Wheel speed {c.upper()}", "wheel_speed",
+            aliases=_corner_aliases(("wheel speed", "wheel spd", "ws"), c)))
         defs.append(ChannelDef(
             f"tyre_press_{c}", "bar", f"Tyre pressure {c.upper()}", "pressure",
             aliases=_corner_aliases(("tyre press", "tire press", "tyre pressure", "tire pressure",
@@ -181,8 +199,14 @@ def _build() -> dict:
     derived = [
         ChannelDef("lap_distance", "m", "Distance from the start/finish line, scaled to the common "
                    "lap length", kind="derived", requires=("time",)),
-        ChannelDef("acc_long_calc", "g", "Longitudinal acceleration from d(speed)/dt, 15 Hz low-pass",
+        ChannelDef("acc_long_calc", "g", "Longitudinal acceleration from d(speed)/dt, 15 Hz low-pass "
+                   "(2 Hz when speed is recorded in coarse steps)",
                    kind="derived", sign="+ve accelerating", requires=("speed",)),
+        ChannelDef("acc_lat_rebuilt", "g", "Lateral acceleration rebuilt from damper roll, calibrated "
+                   "against the logged channel. Only present when acc_lat is recorded too coarsely "
+                   "to use; 5 Hz bandwidth", kind="derived", sign="+ve in left-hand corners",
+                   requires=("acc_lat", "susp_travel_fl", "susp_travel_fr", "susp_travel_rl",
+                             "susp_travel_rr")),
         ChannelDef("acc_lat_calc", "g", "Lateral acceleration a neutral-steer car would make for the "
                    "steering applied: V² δ / (g L)", kind="derived", sign="+ve in left-hand corners",
                    requires=("speed", "steering")),

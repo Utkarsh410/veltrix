@@ -46,6 +46,8 @@ class Session:
     notes: list = field(default_factory=list)   # [(level, message)], level: "info" | "warning"
     lap_source: str = ""
     crossing_method: str = ""
+    coarse: dict = field(default_factory=dict)    # {channel id: step} recorded too coarsely
+    rebuilt: dict = field(default_factory=dict)   # {signal: how it was rebuilt}
 
     def frame(self) -> pd.DataFrame:
         """Normalised and derived channels side by side."""
@@ -65,7 +67,8 @@ class Session:
         return {"source": self.raw.source, "sha256": self.raw.sha256, "info": self.raw.info,
                 "rate_hz": self.rate_hz, "lap_length": self.lap_length,
                 "lap_source": self.lap_source, "crossing_method": self.crossing_method,
-                "samples": len(self.channels), "mapping": self.mapping, "units": self.units}
+                "samples": len(self.channels), "mapping": self.mapping, "units": self.units,
+                "coarse": self.coarse, "rebuilt": self.rebuilt}
 
 
 def load_session(path: str | Path, **kwargs) -> Session:
@@ -75,7 +78,7 @@ def load_session(path: str | Path, **kwargs) -> Session:
 
 def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: dict | None = None,
                   rate_hz: float | None = None, flip: tuple = (),
-                  start_finish_index: int | None = None) -> Session:
+                  start_finish_index: int | None = None, units: dict | None = None) -> Session:
     """Normalise a RawTable into a Session.
 
     mapping: {channel id: source column} to override the automatic mapping
@@ -84,6 +87,9 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
              file's own median rate.
     flip:    channel ids whose sign is opposite to the schema's convention in
              this file (e.g. ("steering", "acc_lat")).
+    units:   {source column: unit} to state or correct a column's unit. A unit
+             given here is trusted: it replaces the file's units row for that
+             column and switches off the engine's own unit checks for it.
     start_finish_index: source row at which the car is on the start/finish
              line, for timing laps from position when the file has no lap
              channel, beacons or lap distance.
@@ -105,7 +111,14 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
             f"Columns: {list(raw.data.columns)[:20]}. Pass mapping={{channel: column}} to set them.")
 
     # ── units ──────────────────────────────────────────────────────────────
+    stated = dict(units or {})
+    unknown = [c for c in stated if c not in raw.data.columns]
+    if unknown:
+        raise ValueError(f"units= names column(s) that are not in the file: {unknown}")
+    raw.units = {**raw.units, **stated}
     cdf, units = _to_canonical(raw, mapped, note)
+    _accel_unit_check(cdf, raw, mapped, stated, note)
+    coarse = _resolution_check(cdf, mapped, units, note)
     if "time" not in cdf:
         cdf["time"] = np.arange(len(cdf)) / rate_hz
         units["time"] = "s"
@@ -165,12 +178,16 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     units["lap"] = "-"
 
     lap_table = lap_table.drop(columns=["start_pos", "end_pos"])
-    derived, derived_notes = compute_derived(channels, rate_hz, vehicle)
-    notes += [("info", m) for m in derived_notes]
+    lap_table = _stints(lap_table, channels, rate_hz, note)
+    lap_table = _lap_length_check(lap_table, note)
+    _sign_check(channels, note)
+    derived, derived_notes, rebuilt = compute_derived(channels, rate_hz, vehicle, coarse)
+    notes += [("warning" if "cannot be rebuilt" in m else "info", m) for m in derived_notes]
 
     return Session(raw=raw, channels=channels, derived=derived, laps=lap_table, mapping=mapped,
                    units=units, rate_hz=rate_hz, lap_length=lap_length, vehicle=vehicle,
-                   notes=notes, lap_source=source, crossing_method=info["crossing"])
+                   notes=notes, lap_source=source, crossing_method=info["crossing"],
+                   coarse=coarse, rebuilt=rebuilt)
 
 
 # ── steps ─────────────────────────────────────────────────────────────────────
@@ -299,6 +316,147 @@ def _time_checks(cdf, raw: RawTable, note) -> None:
     for cid in cdf.columns:
         if cid != "lap" and np.isnan(cdf[cid].to_numpy(float)).all():
             note("warning", f"{cid} has no numeric values.")
+
+
+# Coarsest step each channel may be recorded in before analysis suffers
+MAX_STEP = {"speed": 0.5, "acc_lat": 0.02, "acc_long": 0.02, "yaw_rate": 0.01}
+PIT_SPEED_KMH, PIT_STOP_S = 5.0, 3.0      # stationary this long = a pit stop
+SHORT_LAP_FRACTION = 0.004                # a lap this much shorter than the rest is flagged
+
+
+def _resolution_check(cdf, mapped, units, note) -> dict:
+    """Find channels recorded or exported in steps too coarse to analyse directly
+    (typically an export with too few decimal places). Returns {channel id: step}."""
+    coarse, found = [], {}
+    for cid, limit in MAX_STEP.items():
+        if cid not in cdf:
+            continue
+        values = np.unique(cdf[cid].to_numpy(float))
+        values = values[np.isfinite(values)]
+        if len(values) < 2:
+            continue
+        step = float(np.min(np.diff(values)))
+        if step > limit:
+            found[cid] = step
+            coarse.append(f"{mapped[cid]} ({step:.3g} {units[cid]}, {len(values)} distinct values)")
+    if coarse:
+        note("warning", "Recorded in coarse steps: " + "; ".join(coarse) + ". These channels are not "
+                        "used directly where a better signal can be rebuilt — see the notes that follow.")
+    return found
+
+
+def _sign_check(channels, note) -> None:
+    """Steering, lateral g and yaw rate must agree in sign while cornering.
+    The engine does not choose which one is wrong — it reports the conflict."""
+    if "acc_lat" not in channels:
+        return
+    ay = channels["acc_lat"].to_numpy(float)
+    corner = np.abs(ay) > 0.3
+    if corner.sum() < 100:
+        return
+    for cid in ("steering", "yaw_rate"):
+        if cid not in channels:
+            continue
+        x = channels[cid].to_numpy(float)[corner]
+        if np.nanstd(x) == 0:
+            continue
+        r = np.corrcoef(x, ay[corner])[0, 1]
+        if r < -0.3:
+            note("warning", f"{cid} and acc_lat have opposite signs while cornering (r = {r:.2f}). "
+                            "One of them does not follow the schema convention (+ve to the left) — "
+                            "import with flip=(...) for the channel that is wrong.")
+
+
+def _accel_unit_check(cdf, raw: RawTable, mapped, stated, note) -> None:
+    """Check the longitudinal accelerometer against d(speed)/dt.
+
+    Some exports label accelerations m/s² when the numbers are in g (or the
+    reverse). The two differ by a factor of 9.81, which the speed channel
+    exposes. When the evidence is clear the conversion is corrected for every
+    acceleration channel that carried the same label, and a warning says so.
+    Columns whose unit the caller stated are left alone."""
+    if not {"time", "speed", "acc_long"} <= set(cdf) or mapped["acc_long"] in stated:
+        return
+    t = cdf["time"].to_numpy(float)
+    ok = np.isfinite(t) & np.isfinite(cdf["speed"].to_numpy(float)) & np.isfinite(cdf["acc_long"].to_numpy(float))
+    if ok.sum() < 500 or np.any(np.diff(t[ok]) < 0):
+        return
+    # 10 Hz grid, 1 s moving average: enough to compare trends, immune to noise
+    grid = np.arange(t[ok][0], t[ok][-1], 0.1)
+    if len(grid) < 300:
+        return
+    box = np.ones(10) / 10
+    v = np.convolve(np.interp(grid, t[ok], cdf["speed"].to_numpy(float)[ok]) / 3.6, box, mode="same")
+    a = np.convolve(np.interp(grid, t[ok], cdf["acc_long"].to_numpy(float)[ok]), box, mode="same")
+    dv = np.gradient(v, 0.1) / 9.81                      # g
+    use = (v > 15) & (np.abs(dv) > 0.05)
+    use[:10] = use[-10:] = False
+    if use.sum() < 200 or np.std(a[use]) == 0:
+        return
+    r = float(np.corrcoef(dv[use], a[use])[0, 1])
+    slope = float(np.polyfit(dv[use], a[use], 1)[0])     # 1 when acc_long really is in g
+    if r < 0.8:
+        return
+    label = raw.units.get(mapped["acc_long"], "")
+    if 0.07 < slope < 0.145:
+        factor, was, now = 9.81, "m/s²", "g"
+    elif 7.0 < slope < 14.0:
+        factor, was, now = 1 / 9.81, "g", "m/s²"
+    else:
+        return
+    fixed = []
+    for cid in ("acc_long", "acc_lat", "acc_vert"):
+        col = mapped.get(cid)
+        if cid in cdf and col not in stated and raw.units.get(col, "") == label:
+            cdf[cid] = cdf[cid] * factor
+            fixed.append(col)
+    note("warning", f"{', '.join(fixed)}: " + (f"labelled {label} in the file" if label else "no unit in the file")
+         + f", but the values behave like {now} — {mapped['acc_long']} matches d(speed)/dt only when read as "
+           f"{now} (fit slope {slope:.3f} as {was}, r = {r:.2f}). Read as {now}. "
+           f"Pass units={{column: unit}} to override.")
+
+
+def _stints(lap_table, channels, rate_hz, note) -> pd.DataFrame:
+    """Find pit stops (car stationary) and number the stints.
+
+    A lap belongs to the stint that is running at its midpoint. Adds `stint`,
+    `stint_lap` (laps since the stint began, 0 = first) and marks the lap that
+    contains each stop as "pit"."""
+    laps = lap_table.copy()
+    t = channels["time"].to_numpy()
+    stopped = channels["speed"].to_numpy(float) < PIT_SPEED_KMH
+    edges = np.flatnonzero(np.diff(np.r_[False, stopped, False].astype(int)))
+    stops = [(t[a], t[min(b, len(t) - 1)]) for a, b in zip(edges[::2], edges[1::2])
+             if (b - a) / rate_hz >= PIT_STOP_S and t[a] > t[0] + 1.0 and b < len(t) - 1]
+    stop_times = np.array([0.5 * (a + b) for a, b in stops])
+    mid = 0.5 * (laps["t_start"] + laps["t_end"]).to_numpy()
+    laps["stint"] = 1 + np.searchsorted(stop_times, mid)
+    laps["stint_lap"] = laps.groupby("stint").cumcount()
+    for ts in stop_times:
+        hit = (laps["t_start"] <= ts) & (laps["t_end"] > ts)
+        laps.loc[hit & laps["status"].isin(["flying", "slow"]), "status"] = "pit"
+    if len(stops):
+        longest = max(b - a for a, b in stops)
+        note("info", f"{len(stops)} pit stop(s) found (longest {longest:.0f} s stationary) — "
+                     f"{laps['stint'].nunique()} stints.")
+    return laps
+
+
+def _lap_length_check(laps, note) -> pd.DataFrame:
+    """Mark flying laps that are clearly shorter than the rest as "short": on a
+    measured distance channel that usually means the lap cut part of the track.
+    Short laps do not count as flying, so they cannot become the best lap."""
+    flying = laps[laps["status"] == "flying"]
+    if len(flying) < 4 or not np.isfinite(flying["dist_m"]).all():
+        return laps
+    ref = float(flying["dist_m"].median())
+    short = flying[flying["dist_m"] < ref * (1 - SHORT_LAP_FRACTION)]
+    laps = laps.copy()
+    for lap in short.itertuples():
+        laps.loc[laps["lap"] == lap.lap, "status"] = "short"
+        note("warning", f"Lap {lap.lap} covers {ref - lap.dist_m:.0f} m less than the typical "
+                        f"{ref:.0f} m — marked \"short\" (likely a track cut) and left out of best-lap selection.")
+    return laps
 
 
 def _lap_runs(cdf, raw: RawTable, t, d, timer_crossings, start_finish_index):

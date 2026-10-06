@@ -53,25 +53,36 @@ def read_csv(path: str | Path) -> RawTable:
     return table
 
 
+HEAD_BYTES = 400_000      # the layout is worked out from the start of the file only
+
+
 def parse_csv_text(text: str) -> RawTable:
-    lines = text.splitlines()
+    if "\r" in text[:HEAD_BYTES]:
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = text[:HEAD_BYTES].split("\n")
     if not lines:
         raise ValueError("The file is empty.")
+    if len(text) > HEAD_BYTES:
+        lines = lines[:-1]            # the last line of the head may be cut mid-row
     sep = _detect_sep(lines)
     header_row, data_row = _find_header_and_data(lines, sep) or (0, 1)
     decimal = _detect_decimal(lines[data_row:data_row + 200], sep)
+    names = _unique(_split_row(lines[header_row], sep))
 
-    # Keep just the header and the data — this drops the metadata block above
-    # the header, and the units row and blank lines between the two.
-    data_lines = [line for line in lines[data_row:] if line.strip()]
-    body = "\n".join([lines[header_row]] + data_lines)
+    # Parse from the first data row: this drops the metadata block above the
+    # header, and the units row and blank lines between the two.
+    offset = _line_offset(text, data_row)
+    kwargs = dict(sep=sep, decimal=decimal, header=None, names=names, skip_blank_lines=True,
+                  index_col=False)
+    skipped = 0
     try:
-        df = pd.read_csv(io.StringIO(body), sep=sep, decimal=decimal)
+        df = pd.read_csv(io.StringIO(text[offset:]), **kwargs)
     except (pd.errors.ParserError, ValueError):
-        df = pd.read_csv(io.StringIO(body), sep=sep, decimal=decimal, on_bad_lines="skip")
-    skipped = len(data_lines) - len(df)
+        df = pd.read_csv(io.StringIO(text[offset:]), on_bad_lines="skip", **kwargs)
+        skipped = sum(1 for line in text[offset:].splitlines() if line.strip()) - len(df)
 
-    units = {c: u for c, u in zip(df.columns, _units_row(lines, header_row, data_row, sep) or []) if u}
+    units_row = _units_row(lines, header_row, data_row, sep) or []
+    units = {c: u for c, u in zip(names, units_row) if u and set(u) != {"."}}
     info, beacons = _header_fields(lines[:header_row], sep, decimal)
 
     df = df.dropna(axis=1, how="all").dropna(axis=0, how="all").reset_index(drop=True)
@@ -91,6 +102,25 @@ def parse_csv_text(text: str) -> RawTable:
             if parsed < present:
                 bad_cells[c] = present - parsed
     return RawTable(df, units, info, beacons, sep, decimal, bad_cells, max(skipped, 0))
+
+
+def _line_offset(text: str, n_lines: int) -> int:
+    """Character offset of the start of line `n_lines` (0-based)."""
+    pos = 0
+    for _ in range(n_lines):
+        pos = text.index("\n", pos) + 1
+    return pos
+
+
+def _unique(names):
+    """Column names made unique and non-empty, keeping the first of each as is."""
+    seen, out = {}, []
+    for i, name in enumerate(names):
+        name = name or f"column_{i + 1}"
+        k = seen.get(name, 0)
+        seen[name] = k + 1
+        out.append(name if k == 0 else f"{name}.{k}")
+    return out
 
 
 def _detect_sep(lines):

@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ..derived import best_lat
+
 BRAKING_G = -0.3      # longitudinal g below this is the braking phase
 TRACTION_G = 0.2      # longitudinal g above this is the traction phase
 
@@ -13,10 +15,11 @@ def _lat_lon(session, laps=None):
     frame = session.frame()
     if laps is not None:
         frame = frame[frame["lap"].isin(laps)]
-    if "acc_lat" not in frame:
+    lat_id = best_lat(frame)
+    if lat_id is None:
         raise ValueError("G-G analysis needs a lateral acceleration channel.")
     lon_id = "acc_long_calc" if "acc_long_calc" in frame else "acc_long"
-    return frame["acc_lat"].to_numpy(float), frame[lon_id].to_numpy(float)
+    return frame[lat_id].to_numpy(float), frame[lon_id].to_numpy(float)
 
 
 def gg_envelope(lat, lon, bins: int = 36, quantile: float = 0.98) -> pd.DataFrame:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .derived import best_lat
 from .vehicle import G
 
 
@@ -27,11 +28,12 @@ def track_xy(session, lap=None) -> pd.DataFrame:
         out["x"], out["y"] = frame["pos_x"].to_numpy(), frame["pos_y"].to_numpy()
         out.attrs["source"] = "position"
         return out
-    if not {"speed", "acc_lat"} <= set(frame.columns):
+    lat_id = best_lat(frame)
+    if "speed" not in frame or lat_id is None:
         raise ValueError("A track map needs position channels, or speed and lateral acceleration.")
     dt = 1.0 / session.rate_hz
     v = frame["speed"].to_numpy(float) / 3.6
-    ay = frame["acc_lat"].to_numpy(float)
+    ay = frame[lat_id].to_numpy(float)
     with np.errstate(divide="ignore", invalid="ignore"):
         yaw_rate = np.where(v > 5.0, ay * G / v, 0.0)
     heading = np.cumsum(yaw_rate) * dt

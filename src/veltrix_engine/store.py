@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS session   (
 CREATE TABLE IF NOT EXISTS lap       (
     session_id INTEGER NOT NULL REFERENCES session(id) ON DELETE CASCADE,
     lap TEXT NOT NULL, t_start REAL, t_end REAL, lap_time_s REAL, dist_m REAL, d_scale REAL,
-    start_crossed INTEGER, end_crossed INTEGER, status TEXT,
+    start_crossed INTEGER, end_crossed INTEGER, status TEXT, stint INTEGER, stint_lap INTEGER,
     PRIMARY KEY (session_id, lap));
 """
 
@@ -129,9 +129,10 @@ class ProjectStore:
         sid = cur.lastrowid
         for lap in session.laps.itertuples():
             self.db.execute(
-                "INSERT INTO lap VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO lap VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (sid, str(lap.lap), lap.t_start, lap.t_end, lap.lap_time_s, lap.dist_m, lap.d_scale,
-                 int(lap.start_crossed), int(lap.end_crossed), lap.status))
+                 int(lap.start_crossed), int(lap.end_crossed), lap.status,
+                 int(lap.stint), int(lap.stint_lap)))
 
         folder = self.path / "sessions" / str(sid)
         try:

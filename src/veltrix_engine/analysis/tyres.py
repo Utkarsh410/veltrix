@@ -44,13 +44,14 @@ def classify(session, windows: dict | None = None) -> pd.DataFrame:
 def lap_summary(session, windows: dict | None = None) -> pd.DataFrame:
     """One row per lap: lap time, tyre age, mean / max temperature and % of the
     lap in the window per corner, and the car-level cold / in-window / hot split.
-    Tyre age counts laps from the first lap in the session."""
+    Tyre age counts laps from the start of the stint."""
     states = classify(session, windows)
     ch = session.channels
     rows = []
-    for age, lap in enumerate(session.laps.itertuples()):
+    for lap in session.laps.itertuples():
         sel = (ch["lap"] == lap.lap).to_numpy()
-        rec = {"lap": lap.lap, "lap_time_s": lap.lap_time_s, "status": lap.status, "tyre_age": age}
+        rec = {"lap": lap.lap, "lap_time_s": lap.lap_time_s, "status": lap.status,
+               "stint": lap.stint, "tyre_age": lap.stint_lap}
         for c in CORNERS:
             cid = tyre_temp_channel(ch.columns, c)
             if cid is None:
@@ -73,7 +74,8 @@ def detect_anomalies(session, delta_threshold_C: float = 8.0, window_s: float = 
 
     Uses the inner zone when the log has one, otherwise the single sensor. The
     signal is smoothed over 0.1 s first so sensor noise is not flagged, and a
-    change that straddles a lap boundary is ignored. One row per event."""
+    change that straddles a lap boundary is ignored. One row per event;
+    `lap_status` tells a tyre change in a pit lap from an event at speed."""
     ch = session.channels
     fs = session.rate_hz
     win = max(int(round(window_s * fs)), 1)
@@ -97,30 +99,39 @@ def detect_anomalies(session, delta_threshold_C: float = 8.0, window_s: float = 
                            "corner": c, "channel": cid, "delta_C": float(delta.at[peak]),
                            "temp_C": float(ch.at[peak, cid])})
     cols = ["time", "lap", "corner", "channel", "delta_C", "temp_C"]
-    return pd.DataFrame(events, columns=cols).sort_values("time").reset_index(drop=True)
+    out = pd.DataFrame(events, columns=cols).sort_values("time").reset_index(drop=True)
+    out["lap_status"] = out["lap"].map(session.laps.set_index("lap")["status"])
+    return out
 
 
-def fit_degradation(session, statuses=("flying", "out-lap", "in-lap", "slow", "whole session"),
-                    complete_only: bool = True) -> dict:
-    """Linear fit of lap time against tyre age.
+def fit_degradation(session, stint: int | None = None, statuses=("flying",)) -> dict:
+    """Linear fit of lap time against tyre age (laps since the stint began).
 
-    Returns slope [s/lap], intercept, r_squared, the laps used, and
+    stint: which stint to fit. Default: the stint with the most flying laps.
+    Only laps with the given statuses are used; with fewer than three of them
+    the fit falls back to all complete laps, then to all laps of the stint.
+
+    Returns stint, slope [s/lap], intercept, r_squared, the laps used, and
     `threshold_age`: the tyre age at which the fitted loss versus a fresh tyre
     passes 0.5 s per lap. That is a pace marker, not a pit-stop crossover —
     a crossover also needs pit-loss time, fuel effect and traffic."""
-    laps = session.laps.reset_index(drop=True)
-    age = np.arange(len(laps))
-    use = laps["status"].isin(statuses).to_numpy()
-    if complete_only:
-        complete = (laps["start_crossed"] & laps["end_crossed"]).to_numpy()
-        if complete.sum() >= 3:
-            use = use & complete
-    x, y = age[use].astype(float), laps.loc[use, "lap_time_s"].to_numpy(float)
+    laps = session.laps
+    if stint is None:
+        counts = laps[laps["status"] == "flying"].groupby("stint").size()
+        stint = int(counts.idxmax()) if len(counts) else int(laps["stint"].iloc[0])
+    laps = laps[laps["stint"] == stint]
+    use = laps[laps["status"].isin(statuses)]
+    if len(use) < 3:
+        use = laps[laps["start_crossed"] & laps["end_crossed"] & (laps["status"] != "pit")]
+    if len(use) < 3:
+        use = laps
+    x, y = use["stint_lap"].to_numpy(float), use["lap_time_s"].to_numpy(float)
+    result = {"stint": stint, "slope": np.nan, "intercept": np.nan, "r_squared": np.nan,
+              "ages": x, "lap_times": y, "laps": list(use["lap"]), "threshold_age": None}
     if len(x) < 3:
-        return {"slope": np.nan, "intercept": np.nan, "r_squared": np.nan,
-                "ages": x, "lap_times": y, "threshold_age": None}
+        return result
     fit = linregress(x, y)
-    threshold = next((a for a in range(1, 200) if fit.slope * a > LOSS_THRESHOLD_S), None)
-    return {"slope": float(fit.slope), "intercept": float(fit.intercept),
-            "r_squared": float(fit.rvalue ** 2), "ages": x, "lap_times": y,
-            "threshold_age": threshold}
+    result.update(slope=float(fit.slope), intercept=float(fit.intercept),
+                  r_squared=float(fit.rvalue ** 2),
+                  threshold_age=next((a for a in range(1, 200) if fit.slope * a > LOSS_THRESHOLD_S), None))
+    return result

@@ -19,6 +19,55 @@ from .vehicle import G, VehicleParams
 
 CORNERING_G = 0.3     # oversteer metric is only defined above this lateral g
 LLTD_MIN_G = 0.5      # load transfer split is only reported above this lateral g
+COARSE_SPEED_CUTOFF_HZ = 2.0    # d(speed)/dt filter when speed is recorded in coarse steps
+ROLL_CUTOFF_HZ = 5.0            # bandwidth of lateral g rebuilt from damper roll
+ROLL_MIN_SPEED_KMH = 60.0       # calibrate above this speed, away from pit-lane and kerb crawling
+ROLL_MIN_R = 0.8                # weakest roll-to-lateral-g correlation accepted for a rebuild
+
+
+def best_lat(frame) -> str | None:
+    """The lateral acceleration channel to analyse: the rebuilt one when the
+    logged channel was too coarse, otherwise the logged one."""
+    for cid in ("acc_lat_rebuilt", "acc_lat"):
+        if cid in frame:
+            return cid
+    return None
+
+
+def rebuild_lateral_from_roll(channels: pd.DataFrame, fs_hz: float, step_g: float):
+    """Lateral g from damper roll, for files where acc_lat is recorded in steps
+    too coarse to use (typically whole g).
+
+    Body roll is proportional to lateral acceleration, and damper travel is
+    recorded finely. The roll signal (right minus left travel, both axles) is
+    fitted to the logged lateral g by least squares: rounding error in the
+    logged channel is unbiased, so over many samples the fit recovers the scale.
+
+    Returns (signal, info) or (None, reason). info holds the fit and how its
+    leftover error compares with what rounding alone would leave
+    (step / sqrt(12)): when the two are equal, the rebuilt signal explains
+    everything the logged channel is able to show."""
+    susp = [f"susp_travel_{c}" for c in CORNERS]
+    if not all(c in channels for c in susp):
+        return None, "no damper travel on all four corners"
+    fl, fr, rl, rr = (channels[c].to_numpy(float) for c in susp)
+    roll = lowpass((fr - fl) + (rr - rl), ROLL_CUTOFF_HZ, fs_hz)
+    ay = channels["acc_lat"].to_numpy(float)
+    use = np.isfinite(roll) & np.isfinite(ay)
+    if "speed" in channels:
+        use &= channels["speed"].to_numpy(float) > ROLL_MIN_SPEED_KMH
+    if use.sum() < 2000 or np.std(roll[use]) == 0 or np.std(ay[use]) == 0:
+        return None, "too few samples at speed to calibrate damper roll"
+    r = float(np.corrcoef(roll[use], ay[use])[0, 1])
+    if r < ROLL_MIN_R:
+        return None, f"damper roll does not track the logged lateral g well enough (r = {r:.2f})"
+    slope, offset = np.polyfit(roll[use], ay[use], 1)
+    rebuilt = slope * roll + offset
+    info = {"method": "damper roll", "slope_g_per_mm": float(slope), "offset_g": float(offset),
+            "r": r, "samples": int(use.sum()),
+            "residual_g": float(np.std(ay[use] - rebuilt[use])),
+            "rounding_g": float(step_g / np.sqrt(12)), "bandwidth_hz": ROLL_CUTOFF_HZ}
+    return rebuilt, info
 
 
 def lowpass(x: np.ndarray, cutoff_hz: float, fs_hz: float, order: int = 4) -> np.ndarray:
@@ -40,22 +89,37 @@ def lowpass(x: np.ndarray, cutoff_hz: float, fs_hz: float, order: int = 4) -> np
     return y
 
 
-def compute_derived(channels: pd.DataFrame, fs_hz: float,
-                    vehicle: VehicleParams | None = None) -> tuple[pd.DataFrame, list]:
+def compute_derived(channels: pd.DataFrame, fs_hz: float, vehicle: VehicleParams | None = None,
+                    coarse: dict | None = None) -> tuple[pd.DataFrame, list, dict]:
     """Compute every derived channel whose inputs are present.
 
     channels: normalised channels on a uniform time base (schema ids as columns).
-    Returns (derived frame, notes) — notes say what was skipped or assumed."""
+    coarse:   {channel id: step} for channels recorded in steps too coarse to
+              analyse directly. Longitudinal g is then filtered harder, and
+              lateral g is rebuilt from damper roll where the dampers allow.
+    Returns (derived frame, notes, rebuilt) — notes say what was skipped,
+    assumed or rebuilt; rebuilt holds the details of each rebuilt signal."""
     p = vehicle or VehicleParams()
+    coarse = coarse or {}
     dt = 1.0 / fs_hz
-    out, notes = pd.DataFrame(index=channels.index), []
+    out, notes, rebuilt = pd.DataFrame(index=channels.index), [], {}
     has = lambda *ids: all(c in channels for c in ids)
     arr = lambda cid: channels[cid].to_numpy(float)
 
     if has("speed"):
         v = arr("speed") / 3.6                                   # m/s
-        # Longitudinal g: dV/dt, filtered
-        out["acc_long_calc"] = lowpass(np.gradient(v, dt) / G, 15.0, fs_hz)
+        # Longitudinal g: dV/dt, filtered. Coarse speed is a staircase: smooth it
+        # before differentiating, or every step becomes a spike.
+        if "speed" in coarse:
+            fc = COARSE_SPEED_CUTOFF_HZ
+            out["acc_long_calc"] = np.gradient(lowpass(v, fc, fs_hz), dt) / G
+            rebuilt["acc_long_calc"] = {"method": "d(speed)/dt", "bandwidth_hz": fc,
+                                        "speed_step_kmh": float(coarse["speed"])}
+            notes.append(f"acc_long_calc uses a {fc:g} Hz low-pass instead of 15 Hz because speed is "
+                         f"recorded in {coarse['speed']:.3g} km/h steps. Expect about 0.1 g of error; "
+                         "events shorter than half a second are smoothed out.")
+        else:
+            out["acc_long_calc"] = lowpass(np.gradient(v, dt) / G, 15.0, fs_hz)
     else:
         notes.append("No speed channel — no derived channels that depend on speed.")
 
@@ -69,9 +133,28 @@ def compute_derived(channels: pd.DataFrame, fs_hz: float,
         out["acc_lat_calc"] = np.clip(
             lowpass(v ** 2 * road_wheel / (G * p.wheelbase_m), 15.0, fs_hz), -4.0, 4.0)
 
-    if has("acc_lat"):
-        ay = arr("acc_lat")
-        ay_f = lowpass(ay, 15.0, fs_hz)
+    lat_ok = has("acc_lat")
+    if lat_ok and "acc_lat" in coarse:
+        signal, info = rebuild_lateral_from_roll(channels, fs_hz, coarse["acc_lat"])
+        if signal is None:
+            lat_ok = False
+            notes.append(f"Lateral g is recorded in {coarse['acc_lat']:.3g} g steps and cannot be rebuilt "
+                         f"({info}) — balance, load-transfer split and grip utilisation are not computed.")
+        else:
+            out["acc_lat_rebuilt"] = signal
+            rebuilt["acc_lat"] = info
+            notes.append(
+                f"acc_lat_rebuilt: lateral g rebuilt from damper roll because the logged channel is in "
+                f"{coarse['acc_lat']:.3g} g steps (fit r = {info['r']:.2f}; leftover error {info['residual_g']:.3f} g "
+                f"against {info['rounding_g']:.3f} g expected from rounding alone). Used for balance, "
+                f"grip and the track map; {info['bandwidth_hz']:g} Hz bandwidth.")
+
+    if lat_ok:
+        if "acc_lat_rebuilt" in out:
+            ay = ay_f = out["acc_lat_rebuilt"].to_numpy()
+        else:
+            ay = arr("acc_lat")
+            ay_f = lowpass(ay, 15.0, fs_hz)
 
         if has("speed"):
             # Steady-state yaw rate: r = ay g / V (undefined when nearly stopped)
@@ -112,7 +195,7 @@ def compute_derived(channels: pd.DataFrame, fs_hz: float,
             # Filtered dV/dt rather than the raw accelerometer, so pitch and
             # noise do not inflate the number.
             out["grip_util"] = np.hypot(ay_f, out["acc_long_calc"].to_numpy()) / p.grip_limit_g
-    else:
+    elif not has("acc_lat"):
         notes.append("No lateral acceleration channel — balance, load transfer and grip "
                      "utilisation are not computed.")
-    return out, notes
+    return out, notes, rebuilt

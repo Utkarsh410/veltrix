@@ -1,0 +1,595 @@
+<title>__TITLE__</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one engineering sheet, read top to bottom — session strip, lap chart,
+   lap comparison with a shared cursor, grip, then tables and the engine's notes. */
+:root {
+  color-scheme: dark;
+  --bg: #0A0A0D; --panel: #121217; --rule: #2A2A33; --fg: #F4F2F8; --muted: #9A97A6; --faint: #6E6B7A;
+  --accent: #B9A6FF; --s1: #8F79E8; --s2: #B98A3E; --warn: #CDBFA6; --grid: #22222A;
+  --display: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --body: Inter, "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) {
+  color-scheme: light;
+  --bg: #F4F2F8; --panel: #FFFFFF; --rule: #D9D5E3; --fg: #0A0A0D; --muted: #56535F; --faint: #6E6B7A;
+  --accent: #5B47B8; --s1: #6A56C8; --s2: #A0721E; --warn: #7A5B12; --grid: #E6E3EE; } }
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #F4F2F8; --panel: #FFFFFF; --rule: #D9D5E3; --fg: #0A0A0D; --muted: #56535F; --faint: #6E6B7A;
+  --accent: #5B47B8; --s1: #6A56C8; --s2: #A0721E; --warn: #7A5B12; --grid: #E6E3EE; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 56px; display: flex; flex-direction: column; gap: 40px; }
+h1, h2 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(26px, 4vw, 38px); line-height: 1.1; }
+h2 { font-size: 20px; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font: 500 11px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.sub { color: var(--muted); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+section { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.head { display: flex; flex-direction: column; gap: 6px; }
+
+.strip { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 12.5px/1.5 var(--mono); color: var(--muted); }
+.strip b { color: var(--fg); font-weight: 500; }
+.figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border-block: 1px solid var(--rule); }
+.fig { padding: 16px 18px 16px 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fig .v { font: 600 28px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.fig .k { font-size: 12.5px; color: var(--muted); }
+
+.chart { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 14px 14px 8px; min-width: 0; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+.chart .axis { stroke: var(--rule); stroke-width: 1; }
+.chart .gridline { stroke: var(--grid); stroke-width: 1; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--muted); align-items: center; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font-size: 13.5px; }
+.controls label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+select { font: 500 13px var(--mono); color: var(--fg); background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; }
+select:focus-visible, .chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readout { display: flex; flex-wrap: wrap; gap: 4px 20px; font: 400 12.5px/1.6 var(--mono); color: var(--muted); min-height: 21px; }
+.readout b { color: var(--fg); font-weight: 500; }
+.verdict { font-size: 14.5px; }
+.two { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 760px) { .two { grid-template-columns: minmax(0, 1fr); } }
+dl { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0; }
+dl > div { display: contents; }
+dt, dd { margin: 0; padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 13.5px; }
+dt { color: var(--muted); padding-right: 16px; }
+dd { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 12px 7px 0; text-align: right; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font: 500 11px/1.3 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+th:first-child, td:first-child { text-align: left; }
+td.best { font-weight: 500; box-shadow: inset 0 -2px 0 var(--accent); }
+td.txt, th.txt { text-align: left; white-space: normal; min-width: 220px; font-family: var(--body); }
+.band { fill: var(--fg); fill-opacity: 0.055; }
+tr.ref td { color: var(--fg); font-weight: 500; }
+.notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.notes li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--rule); font-size: 13.5px; }
+.tag { font: 500 10.5px/1.9 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); }
+.tag.w { color: var(--warn); }
+h3 { font: 600 15px/1.3 var(--display); margin: 0 0 10px; }
+.advice { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 28px; }
+.advice > div { min-width: 0; }
+.tips { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.tips li { padding: 14px 0; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tips .t { font-weight: 600; font-size: 14.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.tips .gain { font: 500 12px var(--mono); color: var(--accent); white-space: nowrap; }
+.tips .meta { font: 400 11.5px/1.5 var(--mono); color: var(--muted); letter-spacing: 0.02em; }
+.tips .do { font-size: 14px; }
+.tips ul { margin: 2px 0 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; }
+.tips .none { color: var(--muted); font-size: 13.5px; }
+.foot { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 16px; }
+@media (prefers-reduced-motion: no-preference) { .cursor { transition: opacity .12s; } }
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div class="eyebrow">Veltrix Data · engine output</div>
+    <h1 id="title"></h1>
+    <div class="strip" id="strip"></div>
+  </header>
+
+  <div class="figures" id="figures"></div>
+
+  <section id="adviceSection">
+    <div class="head"><h2>What to work on</h2>
+      <p class="sub">Suggestions drawn from this session's data, most worthwhile first. Each one shows the numbers behind it. They are things to test one at a time, not instructions: the engine does not know the car's current setup, and a faster pass through a corner can come from a lap that ran wide.</p></div>
+    <div class="advice">
+      <div><h3>Driver</h3><ol class="tips" id="tipsDriver"></ol></div>
+      <div><h3>Setup directions to test</h3><ol class="tips" id="tipsSetup"></ol></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Lap times</h2>
+      <p class="sub" id="lapSub"></p></div>
+    <div class="legend" id="lapLegend"></div>
+    <div class="chart"><svg id="lapChart" role="img" aria-label="Lap time by lap number"></svg></div>
+    <div class="readout" id="lapReadout">Hover or tap a lap for its time.</div>
+  </section>
+
+  <section id="cmpSection">
+    <div class="head"><h2>Lap comparison</h2>
+      <p class="sub">Two laps on the same distance axis. The lower trace is time lost (up) or gained (down) against the reference as the lap unfolds. Shaded bands are the corners.</p></div>
+    <div class="controls">
+      <label for="refLap">Reference <select id="refLap"></select></label>
+      <label for="cmpLap">Compare <select id="cmpLap"></select></label>
+      <div class="legend" id="cmpLegend"></div>
+    </div>
+    <p class="verdict" id="verdict"></p>
+    <div class="readout" id="cmpReadout"></div>
+    <div class="chart"><svg id="speedChart" tabindex="0" role="img" aria-label="Speed against distance for the two laps"></svg></div>
+    <div class="chart"><svg id="deltaChart" role="img" aria-label="Time delta against distance"></svg></div>
+  </section>
+
+  <section id="cornerSection">
+    <div class="head"><h2>Corner by corner</h2>
+      <p class="sub" id="cornerSub"></p></div>
+    <div class="chart"><svg id="cornerChart" role="img" aria-label="Time gained or lost in each corner"></svg></div>
+    <div class="readout" id="cornerReadout"></div>
+    <div class="scroll"><table id="cornerTable"></table></div>
+    <div class="head"><h2>Corners across the flying laps</h2>
+      <p class="sub" id="cornerSumSub"></p></div>
+    <div class="scroll"><table id="cornerSummary"></table></div>
+  </section>
+
+  <section id="handlingSection">
+    <div class="head"><h2>Understeer and oversteer</h2>
+      <p class="sub" id="handlingSub"></p></div>
+    <div class="legend"><span><i class="sw" style="background:var(--s2);height:10px"></i>Oversteer incidents</span><span><i class="sw" style="background:var(--s1);height:10px"></i>Understeer incidents</span></div>
+    <div class="chart"><svg id="handlingChart" role="img" aria-label="Understeer and oversteer incidents by corner"></svg></div>
+    <div class="readout" id="handlingReadout"></div>
+    <div class="scroll"><table id="handlingCorners"></table></div>
+    <div class="controls">
+      <label for="incLap">Incidents on <select id="incLap"></select></label>
+      <label for="incSev">Severity <select id="incSev"><option value="0">All</option><option value="1" selected>Moderate and severe</option><option value="2">Severe only</option></select></label>
+      <span class="sub" id="incCount"></span>
+    </div>
+    <div class="scroll"><table id="incidentTable"></table></div>
+  </section>
+
+  <section id="gripSection">
+    <div class="head"><h2>Grip</h2>
+      <p class="sub" id="gripSub"></p></div>
+    <div class="two">
+      <div class="chart"><svg id="ggChart" role="img" aria-label="G-G diagram"></svg></div>
+      <div><dl id="gripList"></dl></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head"><h2>Stints</h2>
+      <p class="sub" id="stintSub"></p></div>
+    <div class="scroll"><table id="stintTable"></table></div>
+  </section>
+
+  <section id="sectorSection">
+    <div class="head"><h2>Sectors</h2>
+      <p class="sub">Three equal lengths of the lap, flying laps only. Underlined cells are the best in their column.</p></div>
+    <div class="scroll"><table id="sectorTable"></table></div>
+  </section>
+
+  <section>
+    <div class="head"><h2>What the engine read and assumed</h2>
+      <p class="sub">Every conversion, correction and data problem recorded during the import, in order.</p></div>
+    <ul class="notes" id="notes"></ul>
+  </section>
+
+  <p class="foot" id="foot"></p>
+</div>
+
+<script>
+const D = __DATA__;
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const fmt = s => { if (s == null) return "—"; const m = Math.floor(s / 60); return m + ":" + (s - 60 * m).toFixed(3).padStart(6, "0"); };
+const sign = (x, n = 3) => (x >= 0 ? "+" : "−") + Math.abs(x).toFixed(n);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const lin = (d0, d1, r0, r1) => x => r0 + (x - d0) / (d1 - d0) * (r1 - r0);
+const el = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+const widthOf = svg => Math.max(300, Math.floor(svg.parentElement.clientWidth - 28));
+const setup = (svg, w, h) => { svg.replaceChildren(); svg.setAttribute("viewBox", `0 0 ${w} ${h}`); svg.setAttribute("width", w); svg.setAttribute("height", h); };
+
+const M = D.meta, laps = D.laps, byLap = Object.fromEntries(laps.map(l => [l.lap, l]));
+const best = byLap[M.best_lap];
+const flying = laps.filter(l => l.status === "flying");
+
+// ── header ─────────────────────────────────────────────────────────────────
+$("title").textContent = M.title;
+$("strip").innerHTML = [
+  ["Logged", `${M.date} ${M.time}`.trim()], ["Duration", `${Math.round(M.duration / 60)} min`],
+  ["Rate", `${M.rate} Hz`], ["Samples", M.rows.toLocaleString("en-GB")],
+  ["Channels used", `${M.mapped} of ${M.columns}`], ["Lap length", M.lap_length ? `${M.lap_length.toLocaleString("en-GB")} m` : ""],
+].filter(p => p[1]).map(([k, v]) => `<span>${k} <b>${esc(v)}</b></span>`).join("");
+$("lapSub").textContent = `Every lap in the file, timed line to line. Laps come from ${M.lap_source}. Laps far slower than the best sit at the top edge.`;
+$("figures").innerHTML = [
+  [fmt(best.time), `Best lap (lap ${best.lap})`],
+  D.corners ? [fmt(D.corners.ideal), `Ideal lap by corner, ${sign(D.corners.ideal - best.time)} s`]
+    : M.theoretical ? [fmt(M.theoretical), `Theoretical best, ${sign(M.theoretical - best.time)} s`] : null,
+  [`${laps.length} / ${D.stints.length}`, "Laps / stints"],
+  D.gg ? [`${D.gg.summary.peak_lat_g.toFixed(2)} g`, "Peak lateral" + (D.rebuilt.acc_lat ? ", rebuilt" : "")] : null,
+  D.gg ? [`${D.gg.summary.peak_brake_g.toFixed(2)} g`, "Peak braking" + (D.rebuilt.acc_long_calc ? ", rebuilt" : "")] : null,
+].filter(Boolean).map(([v, k]) => `<div class="fig"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
+
+// ── suggestions ────────────────────────────────────────────────────────────
+$("adviceSection").hidden = !D.advice;
+if (D.advice) for (const [area, id] of [["driver", "tipsDriver"], ["setup", "tipsSetup"]]) {
+  const list = D.advice[area];
+  $(id).innerHTML = list.length ? list.map(i =>
+    `<li><div class="t"><span>${esc(i.title)}</span>${i.gain_s ? `<span class="gain">up to ${i.gain_s.toFixed(2)} s a lap</span>` : ""}</div>` +
+    `<div class="meta">${esc(i.where)} · confidence ${esc(i.confidence)}</div><div class="do">${esc(i.action)}</div>` +
+    `<ul>${i.evidence.map(e => `<li style="border:0;padding:1px 0;display:list-item">${esc(e)}</li>`).join("")}</ul></li>`).join("")
+    : `<li class="none">Nothing in this session's data points to a change here.</li>`;
+}
+
+// ── lap chart ──────────────────────────────────────────────────────────────
+const STATUS = {
+  "flying": { label: "Flying", shape: "dot" }, "short": { label: "Short (track cut)", shape: "diamond" },
+  "slow": { label: "Slow", shape: "ring" }, "pit": { label: "Pit lap", shape: "tri" },
+  "out-lap": { label: "Out-lap / in-lap", shape: "ring2" }, "in-lap": { label: "Out-lap / in-lap", shape: "ring2" },
+  "partial": { label: "Partial", shape: "ring2" }, "whole session": { label: "Whole session", shape: "dot" },
+};
+const OFF_SCALE = 1.12;      // laps slower than this multiple of the best are pinned to the top edge
+laps.forEach((l, i) => { l.pos = i + 1; l.off = l.time > OFF_SCALE * best.time; });
+function mark(shape, x, y, r = 5) {
+  if (shape === "dot") return el("circle", { cx: x, cy: y, r, fill: "var(--s1)", stroke: "var(--panel)", "stroke-width": 2 });
+  if (shape === "ring") return el("circle", { cx: x, cy: y, r: r - 0.5, fill: "var(--panel)", stroke: "var(--muted)", "stroke-width": 2 });
+  if (shape === "ring2") return el("circle", { cx: x, cy: y, r: r - 0.5, fill: "var(--panel)", stroke: "var(--faint)", "stroke-width": 2, "stroke-dasharray": "2 2" });
+  if (shape === "diamond") return el("path", { d: `M${x} ${y - r - 1}L${x + r + 1} ${y}L${x} ${y + r + 1}L${x - r - 1} ${y}Z`, fill: "var(--s2)", stroke: "var(--panel)", "stroke-width": 2 });
+  return el("path", { d: `M${x} ${y - r - 1}L${x + r + 1} ${y + r}L${x - r - 1} ${y + r}Z`, fill: "var(--muted)", stroke: "var(--panel)", "stroke-width": 2 });
+}
+(function lapLegend() {
+  const seen = new Set(), host = $("lapLegend");
+  for (const l of laps) {
+    const s = STATUS[l.status]; if (!s || seen.has(s.label)) continue; seen.add(s.label);
+    const span = document.createElement("span"), svg = el("svg", { width: 16, height: 16, viewBox: "0 0 16 16" });
+    svg.append(mark(s.shape, 8, 8, 4.5)); span.append(svg, s.label); host.append(span);
+  }
+})();
+function drawLaps() {
+  const svg = $("lapChart"), w = widthOf(svg), h = 280, m = { l: 58, r: 14, t: 26, b: 34 };
+  setup(svg, w, h);
+  const times = laps.filter(l => !l.off).map(l => l.time);
+  const lo = Math.floor(Math.min(...times) - 0.5), hi = Math.ceil(Math.max(...times) + 0.5);
+  const x = lin(0.5, laps.length + 0.5, m.l, w - m.r), y = lin(lo, hi, h - m.b, m.t);
+  for (let t = lo; t <= hi; t += 2) {
+    svg.append(el("line", { class: "gridline", x1: m.l, x2: w - m.r, y1: y(t), y2: y(t) }));
+    svg.append(el("text", { x: m.l - 8, y: y(t) + 4, "text-anchor": "end" }, fmt(t).slice(0, 4)));
+  }
+  svg.append(el("text", { x: m.l - 8, y: m.t - 12, "text-anchor": "end" }, "m:ss"));
+  const step = w < 520 ? 4 : 2;
+  for (const l of laps) if (l.pos === 1 || l.pos % step === 0) svg.append(el("text", { x: x(l.pos), y: h - m.b + 18, "text-anchor": "middle" }, l.lap));
+  svg.append(el("text", { x: w - m.r, y: h - 2, "text-anchor": "end" }, "lap"));
+  // stint boundaries: just before each pit lap
+  let stint = laps[0].stint;
+  if (D.stints.length > 1) svg.append(el("text", { x: x(1) - 4, y: m.t - 12 }, "Stint " + stint));
+  for (const l of laps) if (l.stint !== stint) {
+    stint = l.stint; const bx = x(l.pos - 0.5);
+    svg.append(el("line", { class: "axis", x1: bx, x2: bx, y1: m.t - 6, y2: h - m.b, "stroke-dasharray": "3 3" }));
+    svg.append(el("text", { x: bx + 6, y: m.t - 12 }, "Stint " + stint));
+  }
+  svg.append(el("line", { class: "axis", x1: m.l, x2: w - m.r, y1: y(best.time), y2: y(best.time), "stroke-dasharray": "1 3" }));
+  const hits = el("g", {});
+  for (const l of laps) {
+    const s = STATUS[l.status] || STATUS.slow, off = l.off;
+    const px = x(l.pos), py = off ? m.t + 2 : y(l.time);
+    svg.append(mark(s.shape, px, py));
+    if (off) svg.append(el("text", { x: px + 9, y: py + 4 }, fmt(l.time).slice(0, 4)));
+    if (l.lap === best.lap) svg.append(el("circle", { cx: px, cy: py, r: 9, fill: "none", stroke: "var(--fg)", "stroke-width": 1.5 }));
+    const hit = el("rect", { x: px - (x(1) - x(0)) / 2, y: m.t - 8, width: x(1) - x(0), height: h - m.b - m.t + 8, fill: "transparent" });
+    const show = () => $("lapReadout").innerHTML = `Lap <b>${l.lap}</b> · <b>${fmt(l.time)}</b> · ${sign(l.time - best.time)} s to best · ${esc((STATUS[l.status] || {}).label || l.status)} · stint ${l.stint}${l.dist ? " · " + l.dist.toLocaleString("en-GB") + " m" : ""}`;
+    hit.addEventListener("pointerenter", show); hit.addEventListener("pointerdown", show);
+    hits.append(hit);
+  }
+  svg.append(hits);
+}
+
+// ── lap comparison ─────────────────────────────────────────────────────────
+const traceLaps = laps.map(l => l.lap).filter(n => D.traces[n]);
+const HAS_CMP = traceLaps.length >= 2;
+$("cmpSection").hidden = !HAS_CMP;
+const N = HAS_CMP ? D.traces[traceLaps[0]].t.length : 0, STEP = M.grid_step, LEN = (N - 1) * STEP;
+for (const sel of [$("refLap"), $("cmpLap")]) for (const n of traceLaps) {
+  const o = document.createElement("option"); o.value = n;
+  o.textContent = `Lap ${n} · ${fmt(byLap[n].time)}${byLap[n].status !== "flying" ? " · " + byLap[n].status : ""}`; sel.append(o);
+}
+if (HAS_CMP) {
+  const ref = D.traces[best.lap] ? best.lap : traceLaps[0];
+  const others = laps.filter(l => D.traces[l.lap] && l.lap !== ref);
+  const pool = others.filter(l => l.status === "flying");
+  $("refLap").value = ref; $("cmpLap").value = (pool.length ? pool : others).sort((a, b) => a.time - b.time)[0].lap;
+}
+let cursorIdx = null;
+const pedals = (T, i) => (T.thr ? ` · thr ${T.thr[i]}%` : "") + (T.brk ? ` · brk ${T.brk[i]}${M.brake_unit}` : "");
+function swing(delta, win) {
+  const k = Math.round(win / STEP); let loss = [0, -1e9], gain = [0, 1e9];
+  for (let i = 0; i + k < delta.length; i++) { const c = delta[i + k] - delta[i]; if (c > loss[1]) loss = [i, c]; if (c < gain[1]) gain = [i, c]; }
+  return { loss, gain, k };
+}
+function drawCompare() {
+  if (!HAS_CMP) return;
+  const a = +$("refLap").value, b = +$("cmpLap").value, A = D.traces[a], B = D.traces[b];
+  const delta = B.t.map((t, i) => t - A.t[i]);
+  $("cmpLegend").innerHTML = `<span><i class="sw" style="background:var(--s1)"></i>Lap ${a} (reference)</span><span><i class="sw" style="background:var(--s2)"></i>Lap ${b}</span>` +
+    (D.handling ? `<span>◇ oversteer</span><span>□ understeer</span>` : "");
+  const sw = swing(delta, 200), end = byLap[b].time - byLap[a].time, m2 = i => (i * STEP).toLocaleString("en-GB");
+  $("verdict").innerHTML = a === b ? "Pick two different laps to compare." :
+    `Lap ${b} finishes <b class="num">${sign(end)} s</b> against lap ${a}. Biggest loss: <b class="num">${sign(sw.loss[1])} s</b> between ${m2(sw.loss[0])} m and ${m2(sw.loss[0] + sw.k)} m. Biggest gain: <b class="num">${sign(sw.gain[1])} s</b> between ${m2(sw.gain[0])} m and ${m2(sw.gain[0] + sw.k)} m.`;
+
+  const plots = [];
+  const frame = (svg, h, lo, hi, ticks, unit, m) => {
+    const w = widthOf(svg); setup(svg, w, h);
+    const x = lin(0, LEN, m.l, w - m.r), y = lin(lo, hi, h - m.b, m.t);
+    for (const t of ticks) { svg.append(el("line", { class: "gridline", x1: m.l, x2: w - m.r, y1: y(t), y2: y(t) })); svg.append(el("text", { x: m.l - 8, y: y(t) + 4, "text-anchor": "end" }, t)); }
+    svg.append(el("text", { x: m.l - 8, y: m.t - 10, "text-anchor": "end" }, unit));
+    return { svg, w, h, x, y, m };
+  };
+  const path = (arr, x, y) => "M" + arr.map((v, i) => x(i * STEP).toFixed(1) + " " + y(v).toFixed(1)).join("L");
+
+  // speed
+  const vmax = Math.ceil(Math.max(...A.v, ...B.v) / 50) * 50;
+  const sp = frame($("speedChart"), 250, 0, vmax, [...Array(vmax / 50 + 1).keys()].map(i => i * 50), "km/h", { l: 58, r: 14, t: 24, b: 12 });
+  if (D.corners) {
+    let lastLabel = -1e9;
+    for (const c of D.corners.list) {
+      const x0 = sp.x(c.start), x1 = sp.x(c.end);
+      sp.svg.append(el("rect", { class: "band", x: x0, y: sp.m.t, width: Math.max(x1 - x0, 1), height: sp.h - sp.m.t - sp.m.b }));
+      const mid = (x0 + x1) / 2;
+      if (mid - lastLabel > 26) { sp.svg.append(el("text", { x: mid, y: sp.m.t - 10, "text-anchor": "middle" }, c.corner)); lastLabel = mid; }
+    }
+  }
+  sp.svg.append(el("path", { d: path(A.v, sp.x, sp.y), fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round" }));
+  sp.svg.append(el("path", { d: path(B.v, sp.x, sp.y), fill: "none", stroke: "var(--s2)", "stroke-width": 2, "stroke-linejoin": "round" }));
+  // incidents on the two laps: diamond = oversteer, square = understeer, on that lap's own trace
+  if (D.handling && a !== b) for (const [lapNo, T, colour] of [[a, A, "var(--s1)"], [b, B, "var(--s2)"]]) {
+    for (const e of D.handling.events) {
+      if (e.lap !== lapNo || e.severity === "mild") continue;
+      const i = Math.max(0, Math.min(N - 1, Math.round(e.at / STEP))), cx = sp.x(e.at), cy = sp.y(T.v[i]), r = 5.5;
+      const d = e.kind === "oversteer" ? `M${cx} ${cy - r}L${cx + r} ${cy}L${cx} ${cy + r}L${cx - r} ${cy}Z`
+                                       : `M${cx - r + 1} ${cy - r + 1}h${2 * r - 2}v${2 * r - 2}h${-(2 * r - 2)}Z`;
+      sp.svg.append(el("path", { d, fill: "var(--panel)", stroke: colour, "stroke-width": 2 }));
+    }
+  }
+  plots.push(sp);
+  // delta
+  const dmax = Math.max(0.2, Math.ceil(Math.max(...delta.map(Math.abs)) * 5) / 5), dstep = dmax > 2 ? 1 : dmax > 0.8 ? 0.5 : 0.2;
+  const dticks = []; for (let t = -dmax; t <= dmax + 1e-9; t += dstep) dticks.push(+t.toFixed(1));
+  const dp = frame($("deltaChart"), 190, -dmax, dmax, dticks, "Δ s", { l: 58, r: 14, t: 24, b: 30 });
+  dp.svg.append(el("path", { d: path(delta, dp.x, dp.y) + `L${dp.x(LEN)} ${dp.y(0)}L${dp.x(0)} ${dp.y(0)}Z`, fill: "var(--s2)", "fill-opacity": 0.14, stroke: "none" }));
+  dp.svg.append(el("line", { class: "axis", x1: dp.m.l, x2: dp.w - dp.m.r, y1: dp.y(0), y2: dp.y(0) }));
+  dp.svg.append(el("path", { d: path(delta, dp.x, dp.y), fill: "none", stroke: "var(--s2)", "stroke-width": 2, "stroke-linejoin": "round" }));
+  for (let d = 0; d <= LEN; d += dp.w < 520 ? 2000 : 1000) dp.svg.append(el("text", { x: dp.x(d), y: dp.h - 10, "text-anchor": "middle" }, d === 0 ? "0 m" : d.toLocaleString("en-GB")));
+  dp.svg.append(el("text", { x: dp.w - dp.m.r, y: dp.m.t - 10, "text-anchor": "end" }, `+ lap ${b} behind`));
+  plots.push(dp);
+
+  // shared cursor
+  const cursors = plots.map(p => { const g = el("g", { class: "cursor", opacity: 0 });
+    g.append(el("line", { x1: 0, x2: 0, y1: p.m.t, y2: p.h - p.m.b, stroke: "var(--fg)", "stroke-width": 1 })); p.svg.append(g); return g; });
+  const dots = [el("circle", { r: 4.5, fill: "var(--s1)", stroke: "var(--panel)", "stroke-width": 2 }), el("circle", { r: 4.5, fill: "var(--s2)", stroke: "var(--panel)", "stroke-width": 2 }), el("circle", { r: 4.5, fill: "var(--s2)", stroke: "var(--panel)", "stroke-width": 2 })];
+  cursors[0].append(dots[0], dots[1]); cursors[1].append(dots[2]);
+  const place = i => {
+    cursorIdx = i;
+    if (i == null) { cursors.forEach(c => c.setAttribute("opacity", 0)); $("cmpReadout").textContent = "Move across either chart to read values at a point on the lap."; return; }
+    plots.forEach((p, k) => { cursors[k].setAttribute("opacity", 1); cursors[k].firstChild.setAttribute("x1", p.x(i * STEP)); cursors[k].firstChild.setAttribute("x2", p.x(i * STEP)); });
+    dots[0].setAttribute("cx", sp.x(i * STEP)); dots[0].setAttribute("cy", sp.y(A.v[i]));
+    dots[1].setAttribute("cx", sp.x(i * STEP)); dots[1].setAttribute("cy", sp.y(B.v[i]));
+    dots[2].setAttribute("cx", dp.x(i * STEP)); dots[2].setAttribute("cy", dp.y(delta[i]));
+    $("cmpReadout").innerHTML = `<span><b>${(i * STEP).toLocaleString("en-GB")} m</b></span><span>Lap ${a} <b>${A.v[i].toFixed(0)} km/h</b>${pedals(A, i)}</span><span>Lap ${b} <b>${B.v[i].toFixed(0)} km/h</b>${pedals(B, i)}</span><span>Δ <b>${sign(delta[i])} s</b></span>`;
+  };
+  plots.forEach(p => {
+    const hit = el("rect", { x: p.m.l, y: p.m.t, width: p.w - p.m.l - p.m.r, height: p.h - p.m.t - p.m.b, fill: "transparent", style: "touch-action:pan-y" });
+    const move = e => { const r = p.svg.getBoundingClientRect(), px = (e.clientX - r.left) * p.w / r.width;
+      place(Math.max(0, Math.min(N - 1, Math.round((px - p.m.l) / (p.w - p.m.l - p.m.r) * (N - 1))))); };
+    hit.addEventListener("pointermove", move); hit.addEventListener("pointerdown", move);
+    p.svg.append(hit);
+  });
+  place(cursorIdx);
+}
+$("speedChart").addEventListener("keydown", e => {
+  if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return; e.preventDefault();
+  cursorIdx = Math.max(0, Math.min(N - 1, (cursorIdx ?? Math.round(N / 2)) + (e.key === "ArrowRight" ? 4 : -4))); drawCompare();
+});
+// ── corners ────────────────────────────────────────────────────────────────
+const CN = D.corners;
+$("cornerSection").hidden = !CN || !HAS_CMP;
+const F = CN ? Object.fromEntries(CN.fields.map((f, i) => [f, i])) : {};
+const dv = (a, b) => (a == null || b == null) ? null : b - a;
+function explain(d, T) {                      // mirrors corners.explain in the engine
+  if (Math.abs(d.time) < T.time_s) return "level";
+  const lost = d.time > 0, parts = [];
+  const note = (v, limit, worseNeg, slow, fast, unit) => {
+    if (v == null || Math.abs(v) < limit) return;
+    const worse = worseNeg ? v < 0 : v > 0;
+    if (worse === lost) parts.push(`${worse ? slow : fast} by ${Math.abs(v).toFixed(0)} ${unit}`);
+  };
+  note(d.entry, T.entry_kmh, true, "arrived slower", "arrived faster", "km/h");
+  note(d.brake, T.brake_m, true, "braked earlier", "braked later", "m");
+  note(d.min, T.speed_kmh, true, "lower minimum speed", "higher minimum speed", "km/h");
+  note(d.thr, T.throttle_m, false, "later on throttle", "earlier on throttle", "m");
+  note(d.exit, T.speed_kmh, true, "slower exit", "faster exit", "km/h");
+  return parts.length ? parts.join("; ") : "no single difference stands out";
+}
+function drawCorners() {
+  if (!CN || !HAS_CMP) return;
+  const a = $("refLap").value, b = $("cmpLap").value, A = CN.laps[a], B = CN.laps[b];
+  if (!A || !B) return;
+  const rows = CN.list.map((c, i) => {
+    const d = { time: B[i][F.zone_time_s] - A[i][F.zone_time_s], entry: dv(A[i][F.entry_speed], B[i][F.entry_speed]),
+      brake: dv(A[i][F.brake_m], B[i][F.brake_m]), min: dv(A[i][F.min_speed], B[i][F.min_speed]),
+      thr: dv(A[i][F.throttle_on_m], B[i][F.throttle_on_m]), exit: dv(A[i][F.exit_speed], B[i][F.exit_speed]) };
+    return { c, d, a: A[i], b: B[i], finding: explain(d, CN.thresholds) };
+  });
+  const total = byLap[b] && byLap[a] ? byLap[b].time - byLap[a].time : rows.reduce((s, r) => s + r.d.time, 0);
+  const worst = [...rows].sort((p, q) => q.d.time - p.d.time)[0], bestRow = [...rows].sort((p, q) => p.d.time - q.d.time)[0];
+  $("cornerSub").innerHTML = a === b ? "Pick two different laps above." :
+    `Time gained or lost by lap ${b} against lap ${a} in each corner's zone. The zones cover the whole lap, so the bars add up to the lap delta of <b class="num">${sign(total)} s</b>. Most lost in <b>${worst.c.corner}</b> (<span class="num">${sign(worst.d.time)} s</span>), most gained in <b>${bestRow.c.corner}</b> (<span class="num">${sign(bestRow.d.time)} s</span>). Corners were found from ${CN.source}.`;
+
+  // bars: one per corner, up = time lost
+  const svg = $("cornerChart"), w = widthOf(svg), h = 210, m = { l: 58, r: 14, t: 18, b: 30 };
+  setup(svg, w, h);
+  const top = Math.max(0.1, Math.ceil(Math.max(...rows.map(r => Math.abs(r.d.time))) * 10) / 10);
+  const y = lin(-top, top, h - m.b, m.t), slot = (w - m.l - m.r) / rows.length, bw = Math.min(34, slot - 2);
+  for (const tick of [-top, -top / 2, 0, top / 2, top]) {
+    svg.append(el("line", { class: tick ? "gridline" : "axis", x1: m.l, x2: w - m.r, y1: y(tick), y2: y(tick) }));
+    svg.append(el("text", { x: m.l - 8, y: y(tick) + 4, "text-anchor": "end" }, sign(tick, 2)));
+  }
+  svg.append(el("text", { x: w - m.r, y: m.t - 6, "text-anchor": "end" }, `↑ lap ${b} slower (s)`));
+  const say = r => $("cornerReadout").innerHTML = `<span><b>${r.c.corner}</b> ${r.c.dir === "L" ? "left" : "right"}, ${r.c.kind}, ${r.c.start.toLocaleString("en-GB")}–${r.c.end.toLocaleString("en-GB")} m</span><span>Δ <b>${sign(r.d.time)} s</b></span><span>${esc(r.finding)}</span>`;
+  rows.forEach((r, i) => {
+    const cx = m.l + slot * (i + 0.5), y0 = y(0), y1 = y(r.d.time), up = r.d.time > 0;
+    const hgt = Math.max(Math.abs(y1 - y0), 1), rr = Math.min(4, hgt), x0 = cx - bw / 2, yTop = Math.min(y0, y1);
+    // rounded at the data end only, square on the baseline
+    const d = up ? `M${x0} ${y0}V${yTop + rr}Q${x0} ${yTop} ${x0 + rr} ${yTop}H${x0 + bw - rr}Q${x0 + bw} ${yTop} ${x0 + bw} ${yTop + rr}V${y0}Z`
+                 : `M${x0} ${y0}V${y1 - rr}Q${x0} ${y1} ${x0 + rr} ${y1}H${x0 + bw - rr}Q${x0 + bw} ${y1} ${x0 + bw} ${y1 - rr}V${y0}Z`;
+    svg.append(el("path", { d, fill: up ? "var(--s2)" : "var(--s1)" }));
+    if (slot > 30 || i % 2 === 0) svg.append(el("text", { x: cx, y: h - 10, "text-anchor": "middle" }, r.c.corner));
+    const hit = el("rect", { x: m.l + slot * i, y: m.t, width: slot, height: h - m.t - m.b, fill: "transparent" });
+    hit.addEventListener("pointerenter", () => say(r)); hit.addEventListener("pointerdown", () => say(r));
+    svg.append(hit);
+  });
+  say(worst);
+
+  const cell = (v, n = 0, unit = "") => v == null ? "—" : sign(v, n) + unit;
+  $("cornerTable").innerHTML = `<thead><tr><th>Corner</th><th>Δ time s</th><th>Entry km/h</th><th>Brake point m</th><th>Min speed km/h</th><th>Throttle on m</th><th>Exit km/h</th><th class="txt">What differed</th></tr></thead><tbody>` +
+    rows.map(r => `<tr><td>${r.c.corner} · ${r.c.dir} · ${r.c.kind}</td><td>${sign(r.d.time)}</td><td>${cell(r.d.entry)}</td><td>${cell(r.d.brake)}</td><td>${r.a[F.min_speed].toFixed(0)} → ${r.b[F.min_speed].toFixed(0)}</td><td>${cell(r.d.thr)}</td><td>${cell(r.d.exit)}</td><td class="txt">${esc(r.finding)}</td></tr>`).join("") +
+    `</tbody>`;
+}
+if (CN) {
+  const order = [...CN.summary].sort((p, q) => q.available - p.available).slice(0, 3);
+  $("cornerSumSub").innerHTML = `Best is the fastest time through each corner's zone on any flying lap. Adding the bests gives an ideal lap of <b class="num">${fmt(CN.ideal)}</b>, <span class="num">${sign(CN.ideal - best.time)} s</span> against the best lap. On the table is the typical time minus the best: most in ${order.map(o => `<b>${o.corner}</b> (<span class="num">${o.available.toFixed(2)} s</span>)`).join(", ")}.`;
+  const kind = Object.fromEntries(CN.list.map(c => [c.corner, c]));
+  const maxAvail = Math.max(...CN.summary.map(r => r.available));
+  $("cornerSummary").innerHTML = `<thead><tr><th>Corner</th><th>From–to m</th><th>Best s</th><th>Set on lap</th><th>Typical s</th><th>Spread s</th><th>On the table s</th><th>Typical min km/h</th></tr></thead><tbody>` +
+    CN.summary.map(r => { const c = kind[r.corner]; return `<tr><td>${r.corner} · ${c.dir} · ${c.kind}</td><td>${c.start.toLocaleString("en-GB")}–${c.end.toLocaleString("en-GB")}</td><td>${r.best.toFixed(3)}</td><td>${r.best_lap}</td><td>${r.mean.toFixed(3)}</td><td>${r.spread.toFixed(3)}</td><td class="${r.available === maxAvail ? "best" : ""}">${r.available.toFixed(3)}</td><td>${r.min_speed}</td></tr>`; }).join("") + "</tbody>";
+}
+// ── understeer / oversteer ─────────────────────────────────────────────────
+const HD = D.handling;
+$("handlingSection").hidden = !HD;
+function drawHandling() {
+  if (!HD) return;
+  const rows = HD.by_corner, svg = $("handlingChart"), w = widthOf(svg), h = 200, m = { l: 58, r: 14, t: 18, b: 30 };
+  setup(svg, w, h);
+  const top = Math.max(2, ...rows.map(r => Math.max(r.us, r.os))), tick = top > 12 ? 4 : top > 6 ? 2 : 1;
+  const y = lin(0, top, h - m.b, m.t), slot = (w - m.l - m.r) / rows.length, bw = Math.max(4, Math.min(16, (slot - 8) / 2));
+  for (let v = 0; v <= top; v += tick) {
+    svg.append(el("line", { class: v ? "gridline" : "axis", x1: m.l, x2: w - m.r, y1: y(v), y2: y(v) }));
+    svg.append(el("text", { x: m.l - 8, y: y(v) + 4, "text-anchor": "end" }, v));
+  }
+  svg.append(el("text", { x: m.l - 8, y: m.t - 6, "text-anchor": "end" }, "count"));
+  const bar = (x0, n, fill) => { if (!n) return; const yt = y(n), rr = Math.min(4, y(0) - yt);
+    svg.append(el("path", { d: `M${x0} ${y(0)}V${yt + rr}Q${x0} ${yt} ${x0 + rr} ${yt}H${x0 + bw - rr}Q${x0 + bw} ${yt} ${x0 + bw} ${yt + rr}V${y(0)}Z`, fill })); };
+  const tend = Object.fromEntries(HD.tendency.map(r => [r.corner, r]));
+  const say = r => $("handlingReadout").innerHTML = `<span><b>${r.corner}</b></span><span>${r.os} oversteer · ${r.us} understeer · ${r.severe} severe</span><span>on ${r.laps} of ${r.of} laps</span>` +
+    (r.cause ? `<span>usually ${esc(r.phase)}: ${esc(r.cause)}</span>` : "") + `<span>habit: ${tend[r.corner] ? tend[r.corner].read : "—"}</span>`;
+  rows.forEach((r, i) => {
+    const cx = m.l + slot * (i + 0.5);
+    bar(cx - bw - 1, r.os, "var(--s2)"); bar(cx + 1, r.us, "var(--s1)");
+    if (slot > 30 || i % 2 === 0) svg.append(el("text", { x: cx, y: h - 10, "text-anchor": "middle" }, r.corner));
+    const hit = el("rect", { x: m.l + slot * i, y: m.t, width: slot, height: h - m.t - m.b, fill: "transparent" });
+    hit.addEventListener("pointerenter", () => say(r)); hit.addEventListener("pointerdown", () => say(r));
+    svg.append(hit);
+  });
+  say([...rows].sort((p, q) => (q.os + q.us) - (p.os + p.us))[0]);
+}
+function drawIncidents() {
+  if (!HD) return;
+  const lap = $("incLap").value, sev = +$("incSev").value, rank = { mild: 0, moderate: 1, severe: 2 };
+  const list = HD.events.filter(e => (lap === "all" || String(e.lap) === lap) && rank[e.severity] >= sev);
+  $("incCount").textContent = `${list.length} of ${HD.events.length} incidents shown`;
+  $("incidentTable").innerHTML = `<thead><tr><th>Lap</th><th>Corner</th><th>Where m</th><th>Phase</th><th class="txt">What happened</th><th>Severity</th><th>Opposite lock deg</th><th>Lasted s</th><th>Speed km/h</th><th>Lateral g</th><th>Rear − front km/h</th><th>Time in corner s</th></tr></thead><tbody>` +
+    (list.length ? list.map(e => `<tr><td>${e.lap}${e.status !== "flying" ? " · " + esc(e.status) : ""}</td><td>${e.corner}</td><td>${e.at.toLocaleString("en-GB")}</td><td>${e.phase}</td><td class="txt">${esc(e.cause)}</td><td>${e.severity}</td><td>${e.lock == null ? "—" : e.lock}</td><td>${e.dur.toFixed(1)}</td><td>${e.speed}</td><td>${e.lat.toFixed(2)}</td><td>${e.slip == null ? "—" : sign(e.slip, 0)}</td><td>${e.cost == null ? "—" : sign(e.cost, 2)}</td></tr>`).join("")
+      : `<tr><td class="txt" colspan="12">No incidents match.</td></tr>`) + "</tbody>";
+}
+if (HD) {
+  const nUs = HD.events.filter(e => e.kind === "understeer").length, nOs = HD.events.length - nUs;
+  const nSev = HD.events.filter(e => e.severity === "severe").length, M2 = HD.model;
+  const busiest = [...HD.by_corner].sort((p, q) => (q.os + q.us) - (p.os + p.us)).filter(r => r.os + r.us > 0).slice(0, 3);
+  $("handlingSub").innerHTML = HD.events.length
+    ? `<b class="num">${nOs}</b> oversteer and <b class="num">${nUs}</b> understeer incidents, <b class="num">${nSev}</b> of them severe. Most in ${busiest.map(r => `<b>${r.corner}</b> (${r.os + r.us})`).join(", ")}. An incident is a stretch where a lap needed clearly more steering (understeer) or less, or opposite lock (oversteer), than this car normally needs at that speed, lateral g and point on the track. Lateral g is ${esc(M2.lateral_source)}.`
+    : `No incidents: no lap needed clearly more or less steering than this car normally needs at any point. Lateral g is ${esc(M2.lateral_source)}.`;
+  const tend = Object.fromEntries(HD.tendency.map(r => [r.corner, r]));
+  const deg = v => v == null ? "—" : sign(v, 0);
+  $("handlingCorners").innerHTML = `<thead><tr><th>Corner</th><th>Oversteer</th><th>Understeer</th><th>Severe</th><th>Laps affected</th><th class="txt">Usually</th><th>Habit</th><th>Typical steering vs normal, deg: entry / apex / exit</th></tr></thead><tbody>` +
+    HD.by_corner.map(r => { const c = CN.list.find(x => x.corner === r.corner), q = tend[r.corner] || {};
+      return `<tr><td>${r.corner} · ${c.dir} · ${c.kind}</td><td>${r.os}</td><td>${r.us}</td><td>${r.severe}</td><td>${r.laps} / ${r.of}</td><td class="txt">${r.cause ? esc(r.phase + ": " + r.cause) : "—"}</td><td>${q.read || "—"}</td><td>${deg(q.entry)} / ${deg(q.apex)} / ${deg(q.exit)}</td></tr>`; }).join("") + "</tbody>";
+  const sel = $("incLap"), all = document.createElement("option"); all.value = "all"; all.textContent = "all laps"; sel.append(all);
+  for (const n of [...new Set(HD.events.map(e => e.lap))]) { const o = document.createElement("option"); o.value = n; o.textContent = "lap " + n; sel.append(o); }
+  sel.value = "all";
+  sel.addEventListener("change", drawIncidents); $("incSev").addEventListener("change", drawIncidents);
+  drawIncidents();
+}
+const redrawPair = () => { drawCompare(); drawCorners(); };
+$("refLap").addEventListener("change", redrawPair); $("cmpLap").addEventListener("change", redrawPair);
+
+// ── G-G ────────────────────────────────────────────────────────────────────
+function drawGG() {
+  if (!D.gg) return;
+  const svg = $("ggChart"), w = Math.min(widthOf(svg), 420), h = w, m = 34, R = 2.5;
+  setup(svg, w, h);
+  const x = lin(-R, R, m, w - m), y = lin(-R, R, h - m, m);
+  for (const t of [-2, -1, 0, 1, 2]) {
+    svg.append(el("line", { class: t ? "gridline" : "axis", x1: x(t), x2: x(t), y1: m, y2: h - m }));
+    svg.append(el("line", { class: t ? "gridline" : "axis", x1: m, x2: w - m, y1: y(t), y2: y(t) }));
+    svg.append(el("text", { x: x(t), y: h - m + 16, "text-anchor": "middle" }, t));
+    if (t) svg.append(el("text", { x: m - 8, y: y(t) + 4, "text-anchor": "end" }, t));
+  }
+  svg.append(el("circle", { cx: x(0), cy: y(0), r: x(M.grip_limit) - x(0), fill: "none", stroke: "var(--faint)", "stroke-width": 1, "stroke-dasharray": "4 4" }));
+  const g = el("g", { fill: "var(--s1)", "fill-opacity": 0.28 });
+  for (const [a, b] of D.gg.pts) g.append(el("circle", { cx: x(a).toFixed(1), cy: y(b).toFixed(1), r: 1.6 }));
+  svg.append(g);
+  svg.append(el("path", { d: "M" + D.gg.env.map(([a, b]) => x(a).toFixed(1) + " " + y(b).toFixed(1)).join("L") + "Z", fill: "none", stroke: "var(--fg)", "stroke-width": 1.5, "stroke-linejoin": "round" }));
+  svg.append(el("text", { x: w - m, y: m - 10, "text-anchor": "end" }, "left-hand corners →"));
+  svg.append(el("text", { x: m, y: m - 10 }, "↑ drive   ↓ brake   (g)"));
+}
+const G = D.gg && D.gg.summary, B = D.balance, RB = D.rebuilt;
+$("gripSection").hidden = !D.gg;
+if (D.gg) {
+$("gripSub").textContent = "Lateral against longitudinal g on " + D.gg.scope + ". " +
+  (RB.acc_lat ? "Lateral g is rebuilt from damper roll because the logged channel is too coarse. " : "") +
+  (RB.acc_long_calc ? "Longitudinal g comes from speed with a heavier filter because speed is recorded in coarse steps." : "");
+$("gripList").innerHTML = [
+  ["Peak lateral", `${G.peak_lat_g.toFixed(2)} g`], ["Peak braking", `${G.peak_brake_g.toFixed(2)} g`],
+  ["Peak drive", `${G.peak_drive_g.toFixed(2)} g`], ["Peak combined", `${G.peak_combined_g.toFixed(2)} g`],
+  [`Mean use of the ${M.grip_limit} g reference circle`, `${(G.mean_util * 100).toFixed(0)}%`],
+  ["Time above 75% of it", `${(G.frac_above_75 * 100).toFixed(0)}%`],
+  B.kus != null ? ["Understeer gradient", `${sign(B.kus, 2)} deg/g`] : null,
+  B.ratio != null ? ["Steering ratio found in the data", `${B.ratio.toFixed(1)} : 1`] : null,
+  B.lltd != null ? ["Front share of lateral load transfer", `${B.lltd.toFixed(1)}%`] : null,
+  RB.acc_lat ? ["Lateral g rebuilt from", `damper roll, r = ${RB.acc_lat.r.toFixed(2)}`] : null,
+  RB.acc_long_calc ? ["Longitudinal g rebuilt from", `speed, ${RB.acc_long_calc.bandwidth_hz} Hz`] : null,
+].filter(Boolean).map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+}
+
+// ── tables ─────────────────────────────────────────────────────────────────
+const nStops = D.stints.length - 1;
+$("stintSub").textContent = (nStops ? `Split at the ${nStops} pit stop${nStops > 1 ? "s" : ""}. ` : "No pit stop in this file, so it is one stint. ") +
+  "Understeer gradient is at the road wheels, positive meaning understeer. Lap time trend is per lap of tyre age.";
+const temps = s => s.temps ? ["fl", "fr", "rl", "rr"].map(c => s.temps[c] ?? "—").join(" / ") : "—";
+const trend = s => s.deg_ms == null ? "—" : s.deg_r2 >= 0.3 ? sign(s.deg_ms, 0) + " ms/lap" : "no clear trend";
+$("stintTable").innerHTML = `<thead><tr><th>Stint</th><th>Laps</th><th>Flying</th><th>Best</th><th>Mean flying</th><th>Understeer deg/g</th><th>Lap time trend</th><th>Tyre °C FL / FR / RL / RR</th></tr></thead><tbody>` +
+  D.stints.map(s => `<tr><td>${s.stint}</td><td>${s.laps}</td><td>${s.flying}</td><td>${fmt(s.best)}</td><td>${fmt(s.mean)}</td><td>${s.kus == null ? "—" : sign(s.kus, 2)}</td><td>${trend(s)}</td><td>${temps(s)}</td></tr>`).join("") + "</tbody>";
+$("sectorSection").hidden = !D.sectors.length;
+const bestS = [0, 1, 2].map(k => Math.min(...D.sectors.map(r => r.s[k])));
+$("sectorTable").innerHTML = `<thead><tr><th>Lap</th><th>S1</th><th>S2</th><th>S3</th><th>Lap time</th><th>To best</th></tr></thead><tbody>` +
+  D.sectors.map(r => `<tr class="${r.lap === best.lap ? "ref" : ""}"><td>${r.lap}${r.lap === best.lap ? " · best" : ""}</td>` +
+    r.s.map((v, k) => `<td class="${v === bestS[k] ? "best" : ""}">${v.toFixed(3)}</td>`).join("") +
+    `<td>${fmt(r.time)}</td><td>${sign(r.time - best.time)}</td></tr>`).join("") + "</tbody>";
+$("notes").innerHTML = D.notes.map(n => `<li><span class="tag ${n.level === "warning" ? "w" : ""}">${n.level === "warning" ? "Warning" : "Note"}</span><span>${esc(n.text)}</span></li>`).join("");
+$("foot").textContent = M.footer;
+
+// ── render ─────────────────────────────────────────────────────────────────
+function drawAll() { drawLaps(); drawCompare(); drawCorners(); drawHandling(); drawGG(); }
+drawAll();
+let lastW = document.documentElement.clientWidth, raf = 0;
+new ResizeObserver(() => { const w = document.documentElement.clientWidth; if (w === lastW) return; lastW = w; cancelAnimationFrame(raf); raf = requestAnimationFrame(drawAll); }).observe(document.documentElement);
+</script>
