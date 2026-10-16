@@ -156,7 +156,10 @@ incident list, stints, sectors and import notes are in tabs underneath:
 stints, sectors, a lap comparison and the engineering summaries the channels
 allow. `--export` also writes the tables as CSV. Other options: `--flip` for
 channels with opposite signs, `--unit COLUMN=UNIT` to correct a unit,
-`--wheelbase`, `--steer-ratio`, `--mass`, `--grip-limit`.
+`--wheelbase`, `--steer-ratio`, `--mass`, `--grip-limit`, `--front-weight`, `--wheel-rate-front`,
+`--wheel-rate-rear`. iRacing files supply the mass and static front weight from the setup they carry.
+A value that is neither stated nor in the file is a placeholder, and the report says so rather than
+quoting it as the car's.
 
 The same from Python:
 
@@ -277,7 +280,7 @@ Foundation phase of the product plan:
 |---|---|
 | Audit of the existing toolkits | Done — [docs/AUDIT.md](docs/AUDIT.md) |
 | Canonical channel schema, units and sign conventions | Done — [docs/CHANNEL_SCHEMA.md](docs/CHANNEL_SCHEMA.md) |
-| Core calculations extracted and tested | Done — 356 tests |
+| Core calculations extracted and tested | Done — 368 tests |
 | Golden datasets with expected outputs | Done for synthetic and simulator data; **no real-car dataset yet** |
 | Tested on a full simulator session | Done — see below |
 | Lap detection, distance alignment, delta | Done |

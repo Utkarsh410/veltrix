@@ -83,7 +83,9 @@ def _events(session: Session, rules) -> list:
                                        session.model.get("lap_distance") if session.model.has("lap_distance") else None)
     except Exception:
         pass
-    return sorted(found, key=lambda e: e.t_start)
+    recorded = event_engine.recorded_incidents(session.model)
+    event_engine.confirm_with_records(found, recorded)
+    return sorted(found + recorded, key=lambda e: e.t_start)
 
 
 def _engineering(session: Session) -> dict:

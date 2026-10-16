@@ -262,6 +262,10 @@ def test_iracing_ibt(tmp_path, ref, logger):
     # iRacing writes a flat pedal as the 32-bit float just above 1, as real files show (1.00000012)
     pedal = (ref["throttle"] / 100).to_numpy(np.float64, copy=True)
     pedal[pedal >= 1.0] = float(np.nextafter(np.float32(1), np.float32(2)))
+    abs_on = ((ref["brake"] > 0.5 * ref["brake"].max()) & (np.arange(n) % 7 == 0)).to_numpy()
+    count, flags = np.zeros(n), np.zeros(n)
+    count[n // 2:] = 1                       # one off-track half way through: 1x
+    flags[n // 2:n // 2 + 40] = 0x0202
     variables = [("SessionTime", "double", "s", ref["time"]), ("Speed", "float", "m/s", ref["speed"] / 3.6),
                  ("Lap", "int", "", ref["lap"]), ("LapDist", "float", "m", ref["lap_distance"]),
                  ("LapDistPct", "float", "%", ref["lap_distance"] / logger.lap_length),
@@ -270,7 +274,13 @@ def test_iracing_ibt(tmp_path, ref, logger):
                  ("LatAccel", "float", "m/s^2", ref["acc_lat"] * 9.81), ("LongAccel", "float", "m/s^2", ref["acc_long"] * 9.81),
                  ("RPM", "float", "revs/min", ref["rpm"]), ("Gear", "int", "", ref["gear"]),
                  ("IsOnTrack", "bool", "", np.ones(n, bool)), ("LFtempCL", "float", "C", np.full(n, 80.0)),
-                 ("RFtempCL", "float", "C", np.full(n, 81.0)), ("CarIdxLap", "int", "", np.zeros((n, 64)))]
+                 ("RFtempCL", "float", "C", np.full(n, 81.0)), ("CarIdxLap", "int", "", np.zeros((n, 64))),
+                 # dials and other channels that look like measurements by name but are not
+                 ("dcABS", "float", "", np.full(n, 2.0)), ("dcTractionControl", "float", "", np.full(n, 1.0)),
+                 ("BrakeABSactive", "bool", "", abs_on), ("TireLF_RumblePitch", "float", "Hz", np.zeros(n)),
+                 ("dpLFTireChange", "float", "", np.ones(n)),
+                 ("PlayerCarMyIncidentCount", "int", "", count), ("PlayerIncidents", "int", "irsdk_IncidentFlags", flags),
+                 ("VelocityX", "float", "m/s", ref["speed"] / 3.6), ("VelocityY", "float", "m/s", np.zeros(n))]
     path = tmp_path / "gt3_synthetic 2026-10-08 10-59-30.ibt"
     path.write_bytes(fw.ibt(variables, 20))
     s = load_session(path)
@@ -290,6 +300,15 @@ def test_iracing_ibt(tmp_path, ref, logger):
     assert s.channels["brake"].max() == pytest.approx(100, abs=1e-3) and s.units["brake"] == "%"
     assert s.raw.data["LapDistPct"].max() > 90, "every variable iRacing labels % is scaled, not only the pedals"
     assert any("scaled to 0–100" in m for _, m in s.raw.notes)
+    # the flag, not the driver's dial; no traction-control flag in the file, so none; no rumble pitch as a tyre temperature
+    assert s.mapping.get("abs_active") == "BrakeABSactive" and s.mapping.get("tc_active") is None
+    assert s.mapping.get("tyre_temp_fl") is None
+    assert s.mapping.get("incident_count") == "PlayerCarMyIncidentCount" and s.mapping.get("incident_flags") == "PlayerIncidents"
+    # the car setup in the session info gives the static front weight and the mass
+    assert s.vehicle.front_weight_dist == pytest.approx((3632 + 3462) / (3632 + 3462 + 3206 + 3029), abs=1e-4)
+    assert s.vehicle.mass_kg == pytest.approx(13329 / 9.80665, abs=0.1) and s.vehicle.known("front_weight_dist")
+    assert not s.vehicle.known("wheel_rate_front_N_mm"), "spring rates alone are not wheel rates"
+    assert np.nanmax(np.abs(s.derived["body_slip"])) < 0.01
     assert_same_laps(s, logger, 0.06)
 
 

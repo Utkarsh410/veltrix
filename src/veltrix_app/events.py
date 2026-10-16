@@ -54,10 +54,15 @@ def detect_events(session, rules=None, fit: bool = True) -> tuple[list, str]:
     except (ValueError, KeyError) as e:
         balance = []
         lines.append(f"Balance incidents were not looked for: {e}")
-    events = sorted(found + balance, key=lambda e: e.t_start)
-    head = (f"{len(events)} candidate event(s) for review. Thresholds start from the rule set's values and are raised "
+    recorded = rule_engine.recorded_incidents(session.model)
+    confirmed = rule_engine.confirm_with_records(found + balance, recorded)
+    if recorded:
+        lines.append(f"{len(recorded)} incident(s) recorded by the simulator; {confirmed} candidate(s) coincide with one "
+                     "and are marked confirmed.")
+    events = sorted(found + balance + recorded, key=lambda e: e.t_start)
+    head = (f"{len(found) + len(balance)} candidate event(s) for review. Thresholds start from the rule set's values and are raised "
             "where this session's own signals show they are too low; they are not validated against a car."
-            if fit else f"{len(events)} candidate event(s) for review — thresholds are as configured, not fitted to this session.")
+            if fit else f"{len(found) + len(balance)} candidate event(s) for review — thresholds are as configured, not fitted to this session.")
     return events, " ".join([head] + lines)
 
 
@@ -66,8 +71,15 @@ def describe(event) -> dict:
     ev = event.evidence
     peak = ev.get("peak")
     detail = ev.get("cause") or (f"peak {peak['value']:.3g} of {peak['of']}" if peak else "")
-    what = event.kind if event.kind.lower().startswith(("possible", "braking anomaly")) else f"Possible {event.kind}"
-    return {"lap": event.lap, "what": f"{what[0].upper() + what[1:]} — requires review", "severity": event.severity,
+    status = getattr(event, "status", "candidate")
+    if status == "recorded":
+        what = f"{event.kind[0].upper() + event.kind[1:]} — recorded by the simulator"
+        points = ev.get("points", 0)
+        detail = f"{points:g}x incident points" if points else "flagged, no incident points"
+    else:
+        what = event.kind if event.kind.lower().startswith(("possible", "braking anomaly")) else f"Possible {event.kind}"
+        what = what[0].upper() + what[1:] + (" — confirmed by the simulator's record" if status == "confirmed" else " — requires review")
+    return {"lap": event.lap, "what": what, "status": status, "severity": event.severity,
             "where": f"{ev.get('corner', '')} {ev.get('phase', '')}".strip(), "position_m": event.position_m,
             "time": float(peak["at_s"]) if peak else 0.5 * (event.t_start + event.t_end), "detail": detail,
             "label": event.label, "rule": event.rule}

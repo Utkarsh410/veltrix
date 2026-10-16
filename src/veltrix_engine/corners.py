@@ -37,6 +37,11 @@ SPLIT_SMOOTH_M = 60.0         # ... judged on a signal smoothed this much, so a 
 SLOW_KMH, FAST_KMH = 110.0, 180.0     # corner class by minimum speed
 BRAKE_ON_FRACTION = 0.05      # brake counts as applied above this share of its session maximum
 BRAKE_ON_G = -0.3             # ... or, with no brake channel, below this longitudinal g
+BRAKE_GAP_S = 0.3             # a release shorter than this inside one braking phase (trail-braking) does not end it
+TURN_IN_SHARE = 0.30          # turn-in = where lateral g starts its climb to the corner's peak (typical lap), or where
+                              # it is still below this share of the peak, whichever comes first walking back
+TURN_IN_SMOOTH_M = 30.0       # ... judged on the typical lateral g smoothed this much
+PEAK_G_SAMPLES = 3            # peak deceleration is held for this many grid samples, so one bad sample cannot set it
 THROTTLE_ON, THROTTLE_FULL = 20.0, 95.0
 LAP_STATUSES = ("flying", "short", "slow", "whole session")
 
@@ -68,7 +73,8 @@ def _lap_frames(session, laps, step) -> tuple[np.ndarray, dict]:
     grid = lap_engine.distance_grid(session, step)
     frame = session.frame().copy()
     frame["speed"] = _speed_for_analysis(session)
-    wanted = [c for c in ("speed", "throttle", "brake", "steering", "acc_long_calc", "acc_lat_calc",
+    wanted = [c for c in ("speed", "throttle", "brake", "steering", "acc_long", "acc_long_calc", "acc_lat_calc",
+                          "acc_lat_sustained",
                           "pos_x", "pos_y", best_lat(frame)) if c and c in frame]
     out = {}
     for lap in laps:
@@ -80,6 +86,88 @@ def _lap_frames(session, laps, step) -> tuple[np.ndarray, dict]:
             trace[c] = rows[c].to_numpy()
         out[lap] = lap_engine.on_distance_grid(trace, grid)
     return grid, out
+
+
+def _turn_in_points(frames: dict, laps: list, corners: pd.DataFrame, grid: np.ndarray, step: float) -> dict:
+    """Each corner's turn-in, one point per corner: walking back from the typical
+    lap's peak lateral g between the corner's start and its apex, the point where that climb began — the last
+    low point before the peak, or where lateral g was below TURN_IN_SHARE of the peak,
+    whichever comes first. Never past the end of the corner before. A curved
+    approach (a chicane after a long bend) then still gets its own turn-in."""
+    out = {c.corner: float(c.start_m) for c in corners.itertuples()}
+    if not laps:
+        return out
+    try:                                       # lateral g, or the path's curvature, or the steering estimate
+        typical, _ = _cornering_signal({l: frames[l] for l in laps}, step)
+    except ValueError:
+        return out
+    k_s = max(int(round(TURN_IN_SMOOTH_M / step)), 1)
+    typical = pd.Series(typical).rolling(k_s, center=True, min_periods=1).mean().to_numpy()
+    idx = lambda metres: int(np.clip(round(metres / step), 0, len(grid) - 1))
+    floor = 0
+    for c in corners.itertuples():
+        c0, c1 = idx(c.start_m), idx(c.end_m)
+        # turning in comes before the slowest point: in a chicane whose second part is the
+        # sharper, the turn-in for the braking is still the entry to the first
+        ca = max(idx(getattr(c, "apex_m", c.end_m)), c0)
+        part = typical[c0:ca + 1]
+        if not np.isfinite(part).any():
+            floor = c1
+            continue
+        peak_at = c0 + int(np.nanargmax(np.abs(part)))
+        peak, sign = abs(typical[peak_at]), np.sign(typical[peak_at])
+        k, slack = peak_at, 0.02 * peak
+        while (k > floor and np.isfinite(typical[k - 1]) and sign * typical[k - 1] >= TURN_IN_SHARE * peak
+               and sign * typical[k - 1] <= sign * typical[k] + slack):      # still climbing toward the peak
+            k -= 1
+        out[c.corner] = float(grid[k])
+        floor = c1
+    return out
+
+
+def before_corner(metres: float) -> str:
+    """A braking point as a driver reads it off the marker boards: "120 m before the corner",
+    "5 m into the corner" when the braking starts after turn-in, or "at the turn-in"."""
+    if not np.isfinite(metres):
+        return "—"
+    if abs(metres) < 0.5:
+        return "at the turn-in"
+    return f"{metres:.0f} m before the corner" if metres > 0 else f"{-metres:.0f} m into the corner"
+
+
+def _main_braking(braking: np.ndarray, v: np.ndarray, z0: int, apex: int, floor: int):
+    """(start, end) of the braking phase that slows the car for this corner:
+    of the phases that reach into the zone before the apex, the one that takes
+    off the most speed. A phase may have begun before the zone's start (on the
+    straight shared with the corner before) but not before `floor`, the end of
+    the corner before. A late dab near the apex is then not taken for the
+    braking point. None when the brakes are not used."""
+    phases = []
+    k = apex
+    while k >= z0:
+        if braking[k]:
+            end = k
+            while k > floor and braking[k - 1]:
+                k -= 1
+            phases.append((k, end))
+        k -= 1
+    if not phases:
+        return None
+    return max(phases, key=lambda p: (v[p[0]] - v[min(p[1] + 1, len(v) - 1)], -p[0]))
+
+
+def _close_gaps(on: np.ndarray, t: np.ndarray, gap_s: float) -> np.ndarray:
+    """Fill releases shorter than gap_s between two stretches that are on."""
+    on = np.asarray(on, bool).copy()
+    idx = np.flatnonzero(on)
+    if len(idx) < 2:
+        return on
+    breaks = np.flatnonzero(np.diff(idx) > 1)
+    for b in breaks:
+        a, z = idx[b], idx[b + 1]                      # last on before the gap, first on after it
+        if np.isfinite(t[a]) and np.isfinite(t[z]) and t[z] - t[a] <= gap_s:
+            on[a:z] = True
+    return on
 
 
 # ── 1. where the corners are ──────────────────────────────────────────────────
@@ -161,9 +249,16 @@ def find_corners(session, laps=None, step: float = STEP_M, track="auto") -> pd.D
             rows.append({"corner": f"T{c['number']}", "name": c.get("name", ""), "direction": c["direction"],
                          "start_m": float(grid[a]), "apex_m": float(grid[apex]), "end_m": float(grid[b]),
                          "min_speed": float(speed[apex])})
-        return _finish(pd.DataFrame(rows), session.lap_length,
+        try:                                   # what the data alone would have made of the lap
+            inferred = find_corners(session, laps, step, track=None)
+            check = circuits.validate(t, session.lap_length, inferred)
+        except ValueError as e:
+            check = {"error": str(e)}
+        out = pd.DataFrame(rows)
+        out["basis"] = "circuit file"
+        return _finish(out, session.lap_length,
                        dict(source=f"circuit file ({t['name']})", track=t["name"], track_note=why,
-                            laps=list(laps), step=step))
+                            laps=list(laps), step=step, validation=check))
 
     level = THRESHOLD * np.nanpercentile(np.abs(smooth), 95)
     side = np.where(smooth > level, 1, np.where(smooth < -level, -1, 0))
@@ -217,8 +312,11 @@ def find_corners(session, laps=None, step: float = STEP_M, track="auto") -> pd.D
         rows.append({"corner": f"T{i + 1}", "name": "", "direction": "L" if d > 0 else "R",
                      "start_m": float(grid[a]), "apex_m": float(grid[apex]), "end_m": float(grid[b]),
                      "min_speed": float(speed[apex])})
-    return _finish(pd.DataFrame(rows), session.lap_length,
-                   dict(source=source, track=None, track_note=track_note, laps=list(laps), step=step))
+    out = pd.DataFrame(rows)
+    out["basis"] = "inferred"
+    return _finish(out, session.lap_length,
+                   dict(source=source, track=None, track_note=track_note, laps=list(laps), step=step,
+                        validation=None, tried=[t["name"] for t in candidates]))
 
 
 def _finish(corners: pd.DataFrame, length: float, attrs: dict) -> pd.DataFrame:
@@ -241,12 +339,25 @@ def corner_metrics(session, corners: pd.DataFrame, laps=None, step: float | None
       corner_time_s   time from corner start to corner end
       entry_speed, min_speed, exit_speed   km/h at corner start, lowest, at corner end
       apex_m          where the lowest speed was
-      brake_m         where the brakes went on for this corner (NaN: no braking)
-      peak_brake_g    hardest deceleration in that braking phase
+      brake_m         where the brakes went on for this corner (NaN: no braking). The braking
+                      phase may begin before the zone's own start (braking for a corner often
+                      starts on the straight shared with the corner before), and a release
+                      shorter than BRAKE_GAP_S inside it does not end it
+      turn_in_m       where the car turns in: on the typical lap (median over the laps),
+                      where lateral g first builds to TURN_IN_SHARE of the corner's peak.
+                      One fixed point per corner, as a marker board is; the corner's start
+                      when there is no lateral g
+      brake_before_m  the braking point as a driver sees it: metres before turn-in, the
+                      distance a marker board counts down to. Positive is before the corner;
+                      larger is earlier
+      peak_brake_g    hardest deceleration in that braking phase, sustained over PEAK_G_SAMPLES
+                      grid samples; from the measured longitudinal g when the file has it,
+                      otherwise from d(speed)/dt
       throttle_on_m   where throttle came back above 20% after the apex
       full_throttle_m where it reached 95%
       min_throttle    lowest throttle in the corner, %
-      peak_lat_g      highest lateral g in the corner (when lateral g is available)
+      peak_lat_g      highest lateral g held for a quarter of a second in the corner (when
+                      lateral g is available): a kerb strike's jolt does not set it
     """
     step = step or corners.attrs.get("step", STEP_M)
     laps = _usable_laps(session, laps)
@@ -258,22 +369,30 @@ def corner_metrics(session, corners: pd.DataFrame, laps=None, step: float | None
         top = float(np.nanmax(session.channels["brake"]))
         brake_level = BRAKE_ON_FRACTION * top if top > 0 else None
 
+    turn_in = _turn_in_points(frames, laps, corners, grid, step)
     rows = []
     for lap in laps:
         f = frames[lap]
         t, v = f["t"].to_numpy(), f["speed"].to_numpy()
         lap_time = float(session.lap_row(lap).lap_time_s)
         thr = f["throttle"].to_numpy() if "throttle" in f else None
-        lon = f["acc_long_calc"].to_numpy() if "acc_long_calc" in f else None
+        # measured longitudinal g where there is one: d(speed)/dt turns one irregular speed sample into a spike
+        lon_id = "acc_long" if "acc_long" in f and f["acc_long"].notna().any() else "acc_long_calc" if "acc_long_calc" in f else None
+        lon = f[lon_id].to_numpy() if lon_id else None
+        lon_peak = None if lon is None else -pd.Series(lon).rolling(PEAK_G_SAMPLES, center=True, min_periods=1).max().to_numpy()
         if brake_level is not None:
             braking = f["brake"].to_numpy() > brake_level
         elif lon is not None:
             braking = lon < BRAKE_ON_G
         else:
             braking = None
-        lat_id = best_lat(f)
+        if braking is not None:
+            braking = _close_gaps(braking, t, BRAKE_GAP_S)
+        # the peak the tyres held, not the jolt of a kerb strike
+        lat_id = "acc_lat_sustained" if "acc_lat_sustained" in f else best_lat(f)
         lat = f[lat_id].to_numpy() if lat_id else None
 
+        previous_end = 0
         for n, c in enumerate(corners.itertuples()):
             z0, z1, c0, c1 = idx(c.zone_start_m), idx(c.zone_end_m), idx(c.start_m), idx(c.end_m)
             last = n == len(corners) - 1
@@ -283,20 +402,17 @@ def corner_metrics(session, corners: pd.DataFrame, laps=None, step: float | None
                    "zone_time_s": (lap_time if last else t[z1]) - (0.0 if n == 0 else t[z0]),
                    "corner_time_s": t[c1] - t[c0],
                    "entry_speed": v[c0], "min_speed": v[apex], "exit_speed": v[c1],
-                   "apex_m": grid[apex], "brake_m": np.nan, "peak_brake_g": np.nan,
+                   "apex_m": grid[apex], "brake_m": np.nan, "turn_in_m": turn_in[c.corner], "brake_before_m": np.nan, "peak_brake_g": np.nan,
                    "throttle_on_m": np.nan, "full_throttle_m": np.nan, "min_throttle": np.nan,
                    "peak_lat_g": np.nan}
             if braking is not None:
-                on = np.flatnonzero(braking[z0:apex + 1])
-                if len(on):
-                    # The braking phase that runs up to the apex: walk back from its last sample
-                    end = z0 + on[-1]
-                    start = end
-                    while start > z0 and braking[start - 1]:
-                        start -= 1
+                phase = _main_braking(braking, v, z0, apex, previous_end)
+                if phase is not None:
+                    start, end = phase
                     rec["brake_m"] = grid[start]
-                    if lon is not None:
-                        rec["peak_brake_g"] = -float(np.min(lon[start:end + 1]))
+                    rec["brake_before_m"] = float(turn_in[c.corner] - grid[start])
+                    if lon_peak is not None:
+                        rec["peak_brake_g"] = float(np.nanmax(lon_peak[start:end + 1]))
             if thr is not None:
                 rec["min_throttle"] = float(np.min(thr[c0:c1 + 1]))
                 after = thr[apex:z1 + 1]
@@ -309,6 +425,7 @@ def corner_metrics(session, corners: pd.DataFrame, laps=None, step: float | None
             if lat is not None:
                 rec["peak_lat_g"] = float(np.nanmax(np.abs(lat[c0:c1 + 1])))
             rows.append(rec)
+            previous_end = c1
     return pd.DataFrame(rows)
 
 

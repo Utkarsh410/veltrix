@@ -46,6 +46,10 @@ LAYERS = ("raw", "normalised", "corrected", "calculated")
 MEASURED, RECONSTRUCTED, CALCULATED = "measured", "corrected/reconstructed", "calculated"
 EVENT, INTERPRETATION, HYPOTHESIS = "detected event", "interpretation", "hypothesis/recommendation"
 LABELS = (MEASURED, RECONSTRUCTED, CALCULATED, EVENT, INTERPRETATION, HYPOTHESIS)
+# how far an event is established: a detector's candidate; recorded by the source itself (a simulator's
+# incident system); or a candidate a record (or, later, a person) confirmed
+CANDIDATE, RECORDED, CONFIRMED = "candidate", "recorded", "confirmed"
+STATUSES = (CANDIDATE, RECORDED, CONFIRMED)
 UNKNOWN_UNIT = "unknown"
 GAP_FACTOR = 5.0          # a step longer than this many median steps is a gap; alignment does not bridge it
 
@@ -203,7 +207,8 @@ class Stint:
 
 @dataclass
 class Event:
-    """Something a detector found. Always a candidate for review, never a measurement."""
+    """Something a detector found, or the source recorded. A detector's event is a
+    candidate for review until a record confirms it; never a measurement."""
     kind: str
     t_start: float
     t_end: float
@@ -216,6 +221,8 @@ class Event:
     rule: str = ""
     rule_version: str = ""
     label: str = EVENT
+    status: str = CANDIDATE
+    source: str = ""                   # what found it: "rule", "steering model", "simulator"
 
 
 @dataclass
@@ -375,5 +382,5 @@ def events_from_incidents(events: pd.DataFrame, laps: pd.DataFrame, rule_version
             evidence={"corner": e.corner, "phase": e.phase, "cause": e.cause, "peak_deg": float(e.peak_deg),
                       "speed_kmh": float(e.speed), "lat_g": float(e.lat_g)},
             confidence="requires review", rule="steering residual against the session's own norm",
-            rule_version=rule_version))
+            rule_version=rule_version, source="steering model"))
     return out

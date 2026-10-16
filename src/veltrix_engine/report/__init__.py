@@ -235,22 +235,26 @@ def _data_block(s, engineering_block: dict) -> dict | None:
     by_kind = {}
     for e in model.events:
         by_kind[e.kind] = by_kind.get(e.kind, 0) + 1
-    worst = sorted(model.events, key=lambda e: {"severe": 0, "moderate": 1, "mild": 2}.get(e.severity, 3))[:40]
+    # what the source recorded first, then the most severe candidates
+    worst = sorted(model.events, key=lambda e: (getattr(e, "status", "candidate") != "recorded",
+                                                {"severe": 0, "moderate": 1, "mild": 2}.get(e.severity, 3)))[:40]
     events = [{"kind": e.kind, "lap": e.lap, "at": _r(e.position_m, 0), "t": _r(e.t_start, 2), "dur": _r(e.t_end - e.t_start, 2),
-               "severity": e.severity, "confidence": e.confidence} for e in sorted(worst, key=lambda e: e.t_start)]
+               "severity": e.severity, "confidence": e.confidence, "status": getattr(e, "status", "candidate")}
+              for e in sorted(worst, key=lambda e: e.t_start)]
     limits = [m for level, m in s.notes if level == "warning"]
     limits += [f"{sec['title']}: not assessed — {sec['not_assessed']}." for sec in engineering_block["sections"] if sec["not_assessed"]]
     assumed = [c.id for c in model.channels("normalised") if c.provenance.unit_source == "assumed"]
     if assumed:
         limits.append("The file gives no unit for " + ", ".join(assumed) + "; the schema unit was assumed.")
-    if model.events:
-        limits.append("Detected events are candidates found by threshold rules, not confirmed incidents; the thresholds "
-                      "are illustrative until tuned to the car.")
+    if any(getattr(e, "status", "candidate") != "recorded" for e in model.events):
+        limits.append("Detected events are candidates found by threshold rules and the steering model; only those marked "
+                      "confirmed coincide with an incident the simulator recorded. The thresholds are illustrative until "
+                      "tuned to the car.")
     return {"mapping": mapping, "maths": maths_rows, "event_counts": by_kind, "events": events,
             "event_total": len(model.events), "annotations": [{"lap": a.lap, "t": _r(a.time, 2), "text": a.text,
                                                                "category": a.category, "author": a.author}
                                                               for a in model.annotations],
-            "limitations": limits}
+            "limitations": limits, "counts": s.count_lines() if hasattr(s, "count_lines") else []}
 
 
 def _plain(o):

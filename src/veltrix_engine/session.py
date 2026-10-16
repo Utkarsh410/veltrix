@@ -18,7 +18,7 @@ the lap, corner and balance calculations work on:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -53,6 +53,7 @@ class Session:
     crossing_method: str = ""
     coarse: dict = field(default_factory=dict)    # {channel id: step} recorded too coarsely
     rebuilt: dict = field(default_factory=dict)   # {signal: how it was rebuilt}
+    counts: dict = field(default_factory=dict)    # original against cleaned sample counts — see build_session
     model: SessionModel | None = None             # the canonical model this session is a view of
 
     def frame(self) -> pd.DataFrame:
@@ -74,7 +75,33 @@ class Session:
                 "rate_hz": self.rate_hz, "lap_length": self.lap_length,
                 "lap_source": self.lap_source, "crossing_method": self.crossing_method,
                 "samples": len(self.channels), "mapping": self.mapping, "units": self.units,
-                "coarse": self.coarse, "rebuilt": self.rebuilt}
+                "coarse": self.coarse, "rebuilt": self.rebuilt, "counts": self.counts}
+
+    def count_lines(self) -> list:
+        """The original and cleaned sample counts, one sentence each, in the order they happened."""
+        k = self.counts
+        if not k:
+            return []
+        out = [f"{k['rows_in_file']:,} rows in the file" + (f" ({k['rows_skipped_by_reader']:,} malformed rows "
+                                                             "skipped by the reader before that)" if k.get("rows_skipped_by_reader") else "")]
+        dropped = [(k.get("rows_without_time", 0), "without a time"), (k.get("rows_repeated_time", 0), "repeating the previous timestamp")]
+        dropped = [f"{n:,} {why}" for n, why in dropped if n]
+        out.append(f"{k['rows_used']:,} rows used" + (" — dropped " + " and ".join(dropped) if dropped else ", none dropped")
+                   + (f"; {k['rows_out_of_order']:,} out of time order, re-ordered" if k.get("rows_out_of_order") else ""))
+        if k.get("blanked"):
+            out.append("Blanked as glitches and bridged from the samples either side: "
+                       + ", ".join(f"{cid} {n:,}" for cid, n in k["blanked"].items()))
+        if k.get("on_own_clock"):
+            filled = k["samples_analysed"] - k["rows_used"]
+            out.append(f"{k['samples_analysed']:,} samples analysed on the file's own {k['rate_hz']:g} Hz clock"
+                       + (f": {k['rows_used']:,} as logged, {filled:,} filled from the samples either side" if filled > 0 else
+                          ", sample for sample"))
+        else:
+            out.append(f"{k['samples_analysed']:,} samples analysed, resampled to {k['rate_hz']:g} Hz from "
+                       f"{k['rows_used']:,} logged rows (every analysed sample is interpolated)")
+        if k.get("bridged_derived"):
+            out.append("Derived samples bridged: " + ", ".join(f"{cid} {n:,}" for cid, n in k["bridged_derived"].items()))
+        return out
 
 
 def load_session(path: str | Path, dbc=None, channels=None, progress=None, cancel=None, **kwargs) -> Session:
@@ -105,12 +132,20 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
              line, for timing laps from position when the file has no lap
              channel, beacons or lap distance.
     """
-    vehicle = vehicle or VehicleParams()
+    # a copy: what this file says about its car must not leak into the next file loaded with the same params
+    vehicle = replace(vehicle, source=dict(vehicle.source)) if vehicle else VehicleParams()
     notes: list = []
     note = lambda level, msg: notes.append((level, msg))
     if raw.format != "CSV":
         note("info", f"Read as {raw.format}.")
     notes += [tuple(n) for n in raw.notes]
+    taken = []
+    for name, value in raw.vehicle.items():      # what the file says about the car, unless stated at import
+        if hasattr(vehicle, name) and vehicle.source.get(name) != "user":
+            vehicle.set(name, value, "file")
+            taken.append(name)
+    if taken:
+        note("info", "Car parameters read from the file: " + ", ".join(f"{n} {getattr(vehicle, n):g}" for n in taken) + ".")
 
     # ── map ────────────────────────────────────────────────────────────────
     mapped = auto_map(raw.data.columns)
@@ -139,8 +174,9 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     raw.units = {**raw.units, **stated}
     cdf, units, unit_source = _to_canonical(raw, mapped, note)
     unit_source.update({cid: "stated" for cid, col in mapped.items() if col in stated})
-    _glitch_check(cdf, raw, mapped, note)
-    _speed_spikes(cdf, raw, mapped, note)
+    counts = {"rows_in_file": int(len(raw.data)), "rows_skipped_by_reader": int(raw.skipped_rows or 0), "blanked": {}}
+    _glitch_check(cdf, raw, mapped, note, counts["blanked"])
+    _speed_spikes(cdf, raw, mapped, note, counts["blanked"])
     unit_source.update({cid: "plausibility" for cid in _accel_unit_check(cdf, raw, mapped, stated, note)})
     coarse = _resolution_check(cdf, mapped, units, note)
     if "time" not in cdf:
@@ -155,14 +191,21 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     # ── time base ──────────────────────────────────────────────────────────
     as_logged = cdf            # schema units, the file's own rows: what the raw layer is timed against
     timer_crossings = None
-    cdf = cdf[np.isfinite(cdf["time"])].reset_index(drop=True)
+    timed = np.isfinite(cdf["time"]).to_numpy()
+    counts["rows_without_time"] = int((~timed).sum())
+    cdf = cdf[timed].reset_index(drop=True)
     t = cdf["time"].to_numpy()
     if lap_engine.time_restarts(t):
         cdf["time"], timer_crossings = lap_engine.stitch_lap_timer(t)
         note("info", "Time restarts every lap — treated as a lap timer and stitched into a session clock.")
     _time_checks(cdf, raw, note)
+    steps = np.diff(cdf["time"].to_numpy())
+    counts["rows_out_of_order"] = int((steps < 0).sum())
+    before = len(cdf)
     cdf = (cdf.sort_values("time", kind="stable")
               .drop_duplicates(subset="time", keep="last").reset_index(drop=True))
+    counts["rows_repeated_time"] = before - len(cdf)
+    counts["rows_used"] = int(len(cdf))
     if len(cdf) < 10:
         raise ValueError(f"{raw.source or 'file'}: only {len(cdf)} usable samples.")
     t = cdf["time"].to_numpy()
@@ -209,6 +252,9 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     lap_table = _lap_length_check(lap_table, note)
     _sign_check(channels, note)
     derived, derived_notes, rebuilt = compute_derived(channels, rate_hz, vehicle, coarse)
+    counts.update({"samples_analysed": int(len(channels)), "rate_hz": float(rate_hz),
+                   "on_own_clock": bool(_steady_rate(t) and abs(_steady_rate(t) - rate_hz) < 1e-6),
+                   "bridged_derived": dict(derived.attrs.get("bridged", {}))})
     notes += [("warning" if "cannot be rebuilt" in m else "info", m) for m in derived_notes]
 
     model = build_model(raw, mapped, units, unit_source, as_logged, cdf, channels, derived, lap_table,
@@ -219,7 +265,7 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     return Session(raw=raw, channels=channels, derived=derived, laps=lap_table, mapping=mapped,
                    units=units, rate_hz=rate_hz, lap_length=lap_length, vehicle=vehicle,
                    notes=notes, lap_source=source, crossing_method=info["crossing"],
-                   coarse=coarse, rebuilt=rebuilt, model=model)
+                   coarse=coarse, rebuilt=rebuilt, model=model, counts=counts)
 
 
 # ── steps ─────────────────────────────────────────────────────────────────────
@@ -477,7 +523,7 @@ SPEED_SPIKE_KMH = 40.0        # a speed sample this far from its neighbours on b
 GLITCH_FACTOR = 5.0           # this many times beyond the channel's own 99.9th percentile is not a measurement
 
 
-def _speed_spikes(cdf, raw: RawTable, mapped, note) -> None:
+def _speed_spikes(cdf, raw: RawTable, mapped, note, blanked: dict | None = None) -> None:
     """Blank isolated speed samples that jump away from their neighbours and
     back — a dropped sample reading zero, a wheel-speed spike. Judged against
     the median of the five samples around each one, so a real change of speed,
@@ -491,11 +537,13 @@ def _speed_spikes(cdf, raw: RawTable, mapped, note) -> None:
     if bad.any():
         worst = float(np.max(np.abs(v[bad] - around[bad])))
         cdf.loc[bad, "speed"] = np.nan
+        if blanked is not None:
+            blanked["speed"] = blanked.get("speed", 0) + int(bad.sum())
         note("warning", f"{mapped['speed']}: {int(bad.sum())} sample(s) jump up to {worst:.0f} km/h away from the samples "
                         "either side and straight back. Treated as glitches and left out.")
 
 
-def _glitch_check(cdf, raw: RawTable, mapped, note) -> None:
+def _glitch_check(cdf, raw: RawTable, mapped, note, blanked: dict | None = None) -> None:
     """Blank the few samples that sit far outside everything else a channel
     reads — a crash, a reset to the pits or a logger hiccup can write values
     hundreds of times larger than any real acceleration. Left in, a dozen such
@@ -518,6 +566,8 @@ def _glitch_check(cdf, raw: RawTable, mapped, note) -> None:
             worst = float(np.nanmax(np.abs(written[bad])))
             typical = float(np.nanpercentile(np.abs(written), 99.9))
             cdf.loc[bad, cid] = np.nan
+            if blanked is not None:
+                blanked[cid] = blanked.get(cid, 0) + int(bad.sum())
             note("warning", f"{mapped[cid]}: {int(bad.sum())} samples read up to {worst:,.0f} in the file, far outside the "
                             f"rest of the channel (99.9% of it is within {typical:.3g}). Treated as glitches and left out.")
 

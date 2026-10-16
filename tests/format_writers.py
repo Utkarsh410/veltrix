@@ -214,6 +214,26 @@ SessionInfo:
  Sessions:
  - SessionNum: 0
    SessionType: Practice
+CarSetup:
+ UpdateCount: 6
+ Chassis:
+  Front:
+   ArbSetting: 3
+   NoseWeight: 53.2%
+  LeftFront:
+   CornerWeight: 3632 N
+   SpringRate: 61 N/mm
+  LeftRear:
+   CornerWeight: 3206 N
+   SpringRate: 53 N/mm
+  InCarDials:
+   AbsSetting: 2 (ABS)
+  RightFront:
+   CornerWeight: 3462 N
+   SpringRate: 61 N/mm
+  RightRear:
+   CornerWeight: 3029 N
+   SpringRate: 53 N/mm
 ...
 """
 _IBT_TYPES = {"bool": (1, "?", 1), "int": (2, "<i4", 4), "float": (4, "<f4", 4), "double": (5, "<f8", 8)}

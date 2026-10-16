@@ -130,11 +130,26 @@ def test_time_in_a_zone_is_not_counted_as_a_gain_by_every_section_that_mentions_
 def test_braking_finding_quotes_the_two_braking_points(monza, reports):
     f = next(f for f in findings(reports["monza"], "braking") if "braked later" in f["conclusion"])
     m = C.analyse(monza)["metrics"]
-    m = m[m["lap"].isin([1, 2, 3, 4]) & (m["corner"] == "T1")]
-    best = m.loc[m["zone_time_s"].idxmin()]
-    line = next(e for e in f["evidence"] if e.startswith("T1:"))
-    assert f"{m['brake_m'].median():.0f} m" in line and f"{best['brake_m']:.0f} m" in line
-    assert "T1 toward" in f["recommendation"]
+    m = m[m["lap"].isin([1, 2, 3, 4])]
+    for line in f["evidence"]:
+        corner = line.split(":")[0]
+        part = m[m["corner"] == corner]
+        best = part.loc[part["zone_time_s"].idxmin()]
+        assert C.before_corner(part["brake_before_m"].median()) in line and C.before_corner(best["brake_before_m"]) in line
+        assert best["brake_m"] > part["brake_m"].median(), "only a later braking point is called later"
+        assert f"{corner} toward {C.before_corner(best['brake_before_m'])}" in f["recommendation"]
+
+
+def test_the_braking_point_is_where_braking_starts_not_a_second_press(monza):
+    # Lap 3 into T1 at Monza: on the brakes at 845 m, off, and on again at 941 m. The braking point
+    # is 845 m; reading the second press made the fastest lap look as if it braked 52 m later.
+    m = C.analyse(monza)["metrics"]
+    t1 = m[(m["corner"] == "T1")].set_index("lap")
+    assert 840 <= t1.loc[3, "brake_m"] <= 850
+    # and as a driver reads it off the boards: about 90 m before turn-in, the same point for every lap
+    assert t1["turn_in_m"].nunique() == 1 and 80 <= t1.loc[3, "turn_in_m"] - t1.loc[3, "brake_m"] <= 130
+    assert (t1["brake_before_m"] == t1["turn_in_m"] - t1["brake_m"]).all()
+    assert (t1["peak_brake_g"] < 2.6).all(), "no single-sample spike sets the peak (a GT3 car brakes at about 2 g)"
 
 
 def test_a_clean_session_says_so_with_evidence(reports):
@@ -150,7 +165,7 @@ def test_a_clean_session_says_so_with_evidence(reports):
 def test_repeated_power_oversteer_runs_through_incidents_driver_and_setup(sliding):
     report = engineering.analyse(sliding)
     incidents = findings(report, "incidents")[0]
-    assert "balance incidents" in incidents["conclusion"] and "power oversteer" in " ".join(incidents["evidence"])
+    assert "balance-incident candidates" in incidents["conclusion"] and "power oversteer" in " ".join(incidents["evidence"])
     driver = [f for f in findings(report, "driver_performance") if "power oversteer" in f["conclusion"]]
     assert {f["where"] for f in driver} == {"T4", "T8"} and all("throttle" in f["recommendation"] for f in driver)
     hypothesis = next(f for f in findings(report, "setup_hypotheses") if "rear traction" in f["conclusion"])

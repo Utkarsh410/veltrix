@@ -38,6 +38,7 @@ class RawTable:
     format: str = "CSV"                              # what the file was read as
     notes: list = field(default_factory=list)        # [(level, message)] from the importer
     hints: dict = field(default_factory=dict)        # {channel id: column} the format itself defines
+    vehicle: dict = field(default_factory=dict)      # {VehicleParams field: value} the file states (a setup sheet)
     signals: dict | None = None                      # {column: Signal} on each channel's own clock, for formats
                                                      # that log every channel at its own rate; `data` is then
                                                      # those signals laid on one time base

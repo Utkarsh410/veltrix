@@ -290,6 +290,8 @@ dl.narrow { max-width: 560px; }
   <section class="tabpanel" role="tabpanel" id="panel-data" aria-labelledby="tab-data">
     <h3>Limitations of this report</h3>
     <ul class="limits" id="dataLimits"></ul>
+    <h3>Samples: as logged and as analysed</h3>
+    <ul class="limits" id="dataCounts"></ul>
     <h3>Channel mapping</h3>
     <p class="sub">Which column became which channel, in what unit, and where the unit came from. "assumed" means the file gave none.</p>
     <div class="scroll"><table id="dataMapping"></table></div>
@@ -383,17 +385,21 @@ if (D.data) {
   const X = D.data, row = cells => `<tr>${cells.map(c => `<td>${esc(c == null ? "—" : c)}</td>`).join("")}</tr>`;
   const head = names => `<thead><tr>${names.map(n => `<th>${n}</th>`).join("")}</tr></thead>`;
   $("dataLimits").innerHTML = X.limitations.length ? X.limitations.map(t => `<li>${esc(t)}</li>`).join("") : "<li>None recorded.</li>";
+  $("dataCounts").innerHTML = (X.counts || []).map(t => `<li>${esc(t)}</li>`).join("") || "<li>Not recorded.</li>";
   $("dataMapping").innerHTML = head(["Channel", "Column in the file", "Unit", "Unit from", "Hz", "Flags"]) +
     X.mapping.map(m => row([m.channel, m.column, m.unit, m.unit_source, m.rate, m.flags.join("; ")])).join("");
   $("dataMathsHead").hidden = $("dataMaths").hidden = !X.maths.length;
   $("dataMaths").innerHTML = head(["Name", "Formula", "Unit", "Version", "Invalid samples", "Kind"]) +
     X.maths.map(m => row([m.name, m.formula, m.unit, m.version, `${m.invalid} of ${m.samples}`, m.estimate ? "calculated — estimate" : "calculated"])).join("");
   const counts = Object.entries(X.event_counts).map(([k, n]) => `${k}: ${n}`).join(" · ");
+  const rec = X.events.filter(e => e.status === "recorded").length, conf = X.events.filter(e => e.status === "confirmed").length;
+  const statusText = { recorded: "recorded by the simulator", confirmed: "confirmed by a record", candidate: "candidate — review" };
   $("dataEventsLead").textContent = X.event_total
-    ? `${X.event_total} candidates for review, not confirmed incidents. ${counts}. The ${X.events.length} most severe are listed.`
+    ? `${X.event_total} events: ${rec ? rec + " recorded by the simulator, " : ""}${X.event_total - rec} found by the detectors` +
+      ` (${conf} of them confirmed by a record, the rest candidates for review). ${counts}. ${X.events.length} are listed, records first.`
     : "No events were detected, or the detectors could not run on this file.";
-  $("dataEvents").innerHTML = X.events.length ? head(["Event", "Lap", "At (m)", "Time (s)", "Lasting (s)", "Severity", "Confidence"]) +
-    X.events.map(e => row([e.kind, e.lap, e.at, e.t, e.dur, e.severity, e.confidence])).join("") : "";
+  $("dataEvents").innerHTML = X.events.length ? head(["Event", "Status", "Lap", "At (m)", "Time (s)", "Lasting (s)", "Severity", "Confidence"]) +
+    X.events.map(e => row([e.kind, statusText[e.status] || e.status, e.lap, e.at, e.t, e.dur, e.severity, e.confidence])).join("") : "";
   $("dataNotesHead").hidden = $("dataNotes").hidden = !X.annotations.length;
   $("dataNotes").innerHTML = head(["Lap", "Time (s)", "Category", "Note", "Author"]) +
     X.annotations.map(a => row([a.lap, a.t, a.category, a.text, a.author])).join("");

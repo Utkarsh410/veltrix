@@ -299,6 +299,66 @@ coasting, full-throttle and throttle pick-up figure was wrong (coasting 147 s a 
 allows 1e-3 above 1 for any other format. Tests: `test_iracing_ibt` (real full-scale value),
 `test_a_pedal_logged_as_a_float32_fraction_is_still_read_as_a_fraction`.
 
+## Report findings checked against an independent .ibt parse — fixed 2026-10-16
+
+The user's independent parse of the Spa GR86 `.ibt` confirmed lap timing and corner placement but rejected
+seven findings. Each was traced to its cause on the real file and fixed:
+
+| Finding | Cause | Fix |
+|---|---|---|
+| T18 braking point ±45 m, "88 m later" on the fastest pass | braking phase clipped at the zone start (braking begins on the straight shared with T17), and the last brief re-press taken as the start | `corners._main_braking`: the phase that takes off the most speed, allowed to start before the zone (not before the previous corner's end); `_close_gaps` merges releases < `BRAKE_GAP_S` |
+| T5 best 1.67 g | one irregular speed sample → spike in d(speed)/dt; measured `LongAccel` said 1.20 g | peak from measured `acc_long` when logged, held over `PEAK_G_SAMPLES` |
+| ABS 100% | `abs_active` mapped to `dcABS`, the driver's ABS dial | iRacing hint `BrakeABSactive`; "dc"/dial/cut/pct excluded from ABS/TC; also fixed `tc_active` ← `dcTractionControl` and `tyre_temp_*` ← `Tire*_RumblePitch` / `dp*TireChange` |
+| Static weight 41.5% | `VehicleParams` default quoted as the car's | `VehicleParams.source` (user / file / default); iRacing setup → mass and front weight (53.2%); defaults never quoted as fact |
+| Front load-transfer 50% | share computed from default wheel rates | split withheld unless both wheel rates are stated; measured damper roll per g given instead; `--wheel-rate-front/-rear`, `--front-weight` |
+| "Oversteer is the norm" hypothesis | residual against a model fitted to the same session read as balance | needs measured body slip ≥ `advice.HABIT_SLIP_DEG` at those exits (`body_slip` from `vel_x`/`vel_y`); balance-by-phase finding says so when slip contradicts |
+| Off-tracks on laps 5 and 6 missed | iRacing incident channels not read | `incident_count` / `incident_flags`; "The simulator recorded N incidents" finding; incident passes never used as a corner's fastest pass |
+
+Also: Monza golden test had enshrined the re-press bug (T1 lap 3 "52 m later"); rewritten. Tests:
+`tests/test_report_checks.py`, extended `test_iracing_ibt`, `test_engineering`, `test_advice`.
+Open: incident flag kinds other than 0x01/0x02 are shown as codes, not named; wheel rates still need entering
+for a load-transfer split.
+
+## Braking points measured from the corner — 2026-10-16
+
+Asked for by the user: on track only the corner's marker boards are visible, so a braking point at "6528 m"
+from the line is no use. `corner_metrics` now gives `turn_in_m` (one fixed point per corner: on the typical
+lap, where the cornering signal — lateral g, else path curvature, else the steering estimate — starts its
+climb to the corner's peak, searched between the corner's start and its apex) and `brake_before_m` =
+turn-in − braking point. Report and driver tips quote `corners.before_corner()`: "117 m before the corner",
+or "12 m into the corner" where braking starts after turn-in (trail-braking inside a complex, or a curved
+approach such as Monza's Lesmo 1). `brake_m` stays for comparisons between laps. Open: the boards' own
+reference point varies by circuit; a circuit file could carry board positions.
+
+## Improvement list from the user (P0–P3) — P0 done 2026-10-16
+
+The user supplied a prioritised list (P0 correctness and traceability, P1 driver analysis per corner, P2
+lap-potential honesty, P3 event review) and chose "P0 first, report back before P1".
+
+P0, done:
+- **Original vs cleaned sample counts** — `Session.counts` (rows in file, skipped by reader, without time,
+  repeated time, out of order, used, blanked per channel, analysed, own clock or resampled, derived samples
+  bridged) and `Session.count_lines()`; shown in the report ("70,141 of 70,145 logged rows were used"),
+  `veltrix inspect` and the HTML data tab ("Samples: as logged and as analysed").
+- **Corner zones against circuit definitions** — `circuits.validate()`; when a circuit file fits, the inferred
+  detection is run too and compared turn by turn (found, offsets, missing, merged, extra) →
+  `corners.attrs["validation"]`; every corner row has `basis` ("circuit file" / "inferred"). Report finding
+  "Corner zones are the circuit's own…" or "…inferred from the data, not checked against a circuit
+  definition". Only Monza GP and Silverstone GP files exist; the Monza golden file is the 1966 full course
+  (10,019 m) and is correctly refused.
+- **Implausible acceleration peaks** — `analysis/plausibility.check_peaks()`: each corner pass's lateral and
+  braking peak checked as held (0.25 s median), corroborated (yaw rate × speed; d(speed)/dt) and within a
+  stated grip limit; verdicts kerb / bump / spike / jolt / unsupported / beyond. New `acc_lat_sustained`
+  (corner `peak_lat_g` uses it) and iRacing `on_kerb` (irsdk_TrkSurf rumble 11–14). Unsupported/beyond peaks
+  are removed from the peak figures. Spa: 30 of 228 peaks set aside (12 kerb strikes, 8 bumps, …).
+- **Recorded vs inferred incidents** — `Event.status` (candidate / recorded / confirmed) and `Event.source`;
+  `events.recorded_incidents()` and `confirm_with_records()` used by the app and the project store; report says
+  "N balance-incident candidates inferred from the steering … — K confirmed by a simulator record"; HTML data
+  tab has a Status column, records first.
+
+Next: P1 (per-corner best-vs-comparison view with braking point, release, minimum speed, throttle-on and
+exit speed; zone boundaries on the track map; inferred vs official shown), then P2, P3.
+
 ## Open items carried forward
 
 | Item | Rule | Planned in |

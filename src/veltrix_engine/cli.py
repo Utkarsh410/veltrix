@@ -53,10 +53,11 @@ def heading(text: str) -> None:
 def _load(args):
     """Load the file named on the command line with the shared import options."""
     vehicle = VehicleParams()
-    for field in ("wheelbase_m", "steer_ratio", "mass_kg", "grip_limit_g"):
-        value = getattr(args, field)
+    for field in ("wheelbase_m", "steer_ratio", "mass_kg", "grip_limit_g", "front_weight_dist",
+                  "wheel_rate_front_N_mm", "wheel_rate_rear_N_mm"):
+        value = getattr(args, field, None)
         if value is not None:
-            setattr(vehicle, field, value)
+            vehicle.set(field, value, "user")
     try:
         units = dict(item.split("=", 1) for item in (args.unit or ()))
     except ValueError:
@@ -165,6 +166,8 @@ def inspect(args) -> int:
     print(f"  Loaded     {len(s.raw.data):,} rows × {s.raw.data.shape[1]} columns in {elapsed:.1f} s")
     print(f"  Normalised {len(frame):,} samples at {s.rate_hz:g} Hz, "
           f"{frame['time'].iloc[-1] - frame['time'].iloc[0]:,.0f} s")
+    for line in s.count_lines()[1:]:
+        print(f"             {line}")
     if s.lap_length:
         print(f"  Lap length {s.lap_length:,.0f} m")
 
@@ -463,6 +466,11 @@ def main(argv=None) -> int:
         p.add_argument("--wheelbase", dest="wheelbase_m", type=float)
         p.add_argument("--steer-ratio", dest="steer_ratio", type=float)
         p.add_argument("--mass", dest="mass_kg", type=float)
+        p.add_argument("--front-weight", dest="front_weight_dist", type=float,
+                       help="static front weight as a fraction, e.g. 0.53")
+        p.add_argument("--wheel-rate-front", dest="wheel_rate_front_N_mm", type=float,
+                       help="front roll wheel rate per wheel, N/mm (spring × motion ratio² plus anti-roll bar)")
+        p.add_argument("--wheel-rate-rear", dest="wheel_rate_rear_N_mm", type=float)
         p.add_argument("--grip-limit", dest="grip_limit_g", type=float)
 
     w = sub.add_parser("workspace", help="open the telemetry workspace: drop in files of any format, browse sessions")

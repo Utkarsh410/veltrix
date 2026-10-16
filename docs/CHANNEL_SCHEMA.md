@@ -72,6 +72,9 @@ Without a units row the engine assumes the stored unit, except where the values 
 | `yaw_rate` | rad/s | Yaw rate from a gyro | +ve turning left | yaw rate, yaw velocity, gyro yaw velocity |
 | `tc_active` | - | Traction control intervening (0 / 1) |  | tc, traction control, tc active |
 | `abs_active` | - | ABS intervening (0 / 1) |  | abs, abs active |
+| `incident_count` | - | Incident points the simulator has given the driver so far; a rise is an incident |  | incident count, my incident count |
+| `incident_flags` | - | What the simulator reported for the latest incident (iRacing: low byte kind, high byte penalty) |  | player incidents, incident flags |
+| `vel_x`, `vel_y` | m/s | The car's velocity along and across itself (car frame); set by the format only |  | — |
 | `pos_x` | m | Position in the local track plane, x |  | pos x, position x, world position x |
 | `pos_y` | m | Position in the local track plane, y |  | pos y, position y, y pos |
 | `gps_lat` | deg | GPS latitude |  | gps latitude, latitude, gps lat |

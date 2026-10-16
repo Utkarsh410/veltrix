@@ -111,6 +111,41 @@ def fit(track: dict, lap_length: float, grid, signal) -> tuple[bool, str]:
     return True, f"{agree} of {len(track['corners'])} corners line up"
 
 
+MATCH_SLACK_M = 30.0          # an inferred corner within this of an official turn's span is that turn
+
+
+def validate(track: dict, lap_length: float, inferred) -> dict:
+    """Compare the corners found in the data with a circuit file's turns.
+
+    inferred: the corner table detected from the data alone (corners.find_corners
+    with track=None). Returns {"turns": [...], "extra": [...], "found", "total",
+    "merged"}: for every official turn whether the data shows a corner there, which
+    inferred corner, and how far its start, apex and end lie from the file's span;
+    the inferred corners no official turn accounts for; and the turns the data sees
+    as one corner (a chicane taken in one movement)."""
+    scale = lap_length / float(track["lap_length_m"])
+    rows, used = [], {}
+    for c in track["corners"]:
+        a, b = c["start_m"] * scale, c["end_m"] * scale
+        best, overlap = None, 0.0
+        for r in inferred.itertuples():
+            o = min(b + MATCH_SLACK_M, r.end_m) - max(a - MATCH_SLACK_M, r.start_m)
+            if o > overlap:
+                best, overlap = r, o
+        rec = {"turn": f"T{c['number']}", "name": c.get("name", ""), "direction": c["direction"],
+               "start_m": round(a, 1), "end_m": round(b, 1), "found": best is not None, "inferred": None}
+        if best is not None:
+            rec.update({"inferred": best.corner, "direction_agrees": best.direction == c["direction"],
+                        "start_offset_m": round(best.start_m - a, 1), "end_offset_m": round(best.end_m - b, 1),
+                        "apex_inside": bool(a - MATCH_SLACK_M <= best.apex_m <= b + MATCH_SLACK_M)})
+            used.setdefault(best.corner, []).append(rec["turn"])
+        rows.append(rec)
+    extra = [r.corner for r in inferred.itertuples() if r.corner not in used]
+    merged = {k: v for k, v in used.items() if len(v) > 1}
+    found = sum(r["found"] and r.get("direction_agrees", False) for r in rows)
+    return {"turns": rows, "extra": extra, "merged": merged, "found": found, "total": len(rows)}
+
+
 def draft_from_session(session, corners, name: str | None = None) -> dict:
     """A first circuit file from detected corners, for editing by hand."""
     venue = str(session.raw.info.get("Venue", "")).strip()

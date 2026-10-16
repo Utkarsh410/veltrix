@@ -27,6 +27,7 @@ _HEADER = struct.Struct("<10i")           # ver status tickRate infoUpdate infoL
 _VAR_BUF_OFFSET = 48                      # first of four {tickCount, bufOffset, pad, pad}
 _DISK_HEADER = struct.Struct("<qddii")    # startDate startTime endTime lapCount recordCount, at byte 112
 _VAR = struct.Struct("<iii?3x32s64s32s")
+KERB_MATERIALS = (11, 14)                 # irsdk_TrkSurf Rumble1Material .. Rumble4Material
 _TYPES = {0: "S1", 1: "?", 2: "<i4", 3: "<u4", 4: "<f4", 5: "<f8"}
 
 # tyre carcass temperature across the tread: L / M / R as seen from behind the car
@@ -81,6 +82,10 @@ def parse_ibt(data: bytes) -> RawTable:
     df = pd.DataFrame({name: rec[name].astype(float) for name, _, _ in fields})
     for name in fractions:                # 0-1 in the file, "%" on the label: make the label true
         df[name] = df[name] * 100.0
+    if "PlayerTrackSurfaceMaterial" in df:
+        # irsdk_TrkSurf: 11-14 are the four rumble-strip materials (kerbs)
+        material = df["PlayerTrackSurfaceMaterial"]
+        df["OnKerb"] = ((material >= KERB_MATERIALS[0]) & (material <= KERB_MATERIALS[1])).astype(float)
 
     yaml = data[info_off:info_off + info_len].decode("latin-1", errors="replace")
     info = {}
@@ -103,7 +108,12 @@ def parse_ibt(data: bytes) -> RawTable:
     info = {k: v for k, v in info.items() if v}
 
     hints = {cid: col for cid, col in (("time", "SessionTime"), ("distance", "LapDist"), ("lap", "Lap"),
-                                       ("gps_lat", "Lat"), ("gps_lon", "Lon")) if col in df}
+                                       ("gps_lat", "Lat"), ("gps_lon", "Lon"),
+                                       # the flag, not the driver's ABS dial (dcABS) or the cut level
+                                       ("abs_active", "BrakeABSactive"),
+                                       ("incident_count", "PlayerCarMyIncidentCount"),
+                                       ("vel_x", "VelocityX"), ("vel_y", "VelocityY"), ("on_kerb", "OnKerb"),
+                                       ("incident_flags", "PlayerIncidents")) if col in df}
     for wheel, cid in _CORNER.items():
         for tag, zone in zip(("CL", "CM", "CR"), _ZONES[wheel]):
             if f"{wheel.upper()}temp{tag}" in df:
@@ -114,6 +124,10 @@ def parse_ibt(data: bytes) -> RawTable:
             if col in df:
                 hints[cid_base] = col
 
+    vehicle = _setup_vehicle(yaml)
+    if vehicle:
+        info["Setup"] = ", ".join(f"{k} {v:g}" for k, v in vehicle.items())
+
     notes = [("info", f"{n_vars - arrays} variables at {tick} Hz" + (f"; {arrays} array or text variable(s) left out." if arrays else "."))]
     if fractions:
         shown = ", ".join(n for n in ("Throttle", "Brake", "Clutch") if n in fractions) or fractions[0]
@@ -122,4 +136,32 @@ def parse_ibt(data: bytes) -> RawTable:
     if "IsOnTrack" in df and not df["IsOnTrack"].all():
         off = 1 - float(df["IsOnTrack"].mean())
         notes.append(("info", f"The car is off track (garage or replay) for {off:.0%} of the file."))
-    return RawTable(df, units, info, format="iRacing .ibt", notes=notes, hints=hints)
+    return RawTable(df, units, info, format="iRacing .ibt", notes=notes, hints=hints, vehicle=vehicle)
+
+
+def _setup_vehicle(yaml: str) -> dict:
+    """What the car setup in the session info says about the car: the static
+    front weight and the mass from the four corner weights (car, driver and
+    fuel as they left the garage). Spring rates are there too, but without the
+    motion ratios and anti-roll bar rates they are not wheel rates, so they are
+    not used as such."""
+    setup = yaml.find("CarSetup:")
+    if setup < 0:
+        return {}
+    text = yaml[setup:]
+    corners = {}
+    for corner in ("LeftFront", "RightFront", "LeftRear", "RightRear"):
+        at = text.find(f"{corner}:", text.find("Chassis:"))
+        m = re.search(r"CornerWeight:\s*([\d.]+)\s*N", text[at:at + 600]) if at >= 0 else None
+        if m:
+            corners[corner] = float(m.group(1))
+    out = {}
+    if len(corners) == 4:
+        total = sum(corners.values())
+        out["mass_kg"] = round(total / 9.80665, 1)
+        out["front_weight_dist"] = round((corners["LeftFront"] + corners["RightFront"]) / total, 4)
+    else:
+        nose = re.search(r"NoseWeight:\s*([\d.]+)\s*%", text)
+        if nose:
+            out["front_weight_dist"] = float(nose.group(1)) / 100
+    return out

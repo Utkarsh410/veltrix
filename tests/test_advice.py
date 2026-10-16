@@ -90,14 +90,17 @@ def test_braking_later_on_the_best_pass_becomes_a_brake_later_tip(synthetic):
     found = C.find_corners(synthetic)
     metrics = C.corner_metrics(synthetic, found)
     t2 = metrics["corner"] == "T2"
+    turn_in = float(metrics.loc[t2, "turn_in_m"].iloc[0])
     for lap, brake, time in ((2, 480.0, 9.30), (3, 482.0, 9.32), (4, 505.0, 9.00), (5, 479.0, 9.31)):
-        metrics.loc[t2 & (metrics["lap"] == lap), ["brake_m", "zone_time_s"]] = [brake, time]
+        metrics.loc[t2 & (metrics["lap"] == lap), ["brake_m", "brake_before_m", "zone_time_s"]] = [brake, turn_in - brake, time]
     summary = C.corner_summary(synthetic, found, metrics)
     r = advice.suggest(synthetic, {"corners": found, "metrics": metrics, "summary": summary}, None)
     tip = next(i for i in r["driver"] if i["where"].startswith("T2 "))
     assert tip["title"] == "T2: Brake about 24 m later"
     assert tip["gain_s"] == pytest.approx(0.2325, abs=1e-3)           # typical 9.2325 s against the best 9.00 s
-    assert any("480" in e or "481" in e for e in tip["evidence"]) and any("505" in e for e in tip["evidence"])
+    # quoted as a driver reads it: metres before the corner, not from the start/finish line
+    line = next(e for e in tip["evidence"] if e.startswith("Braking point"))
+    assert f"{turn_in - 481:.0f} m before the corner" in line and f"{turn_in - 505:.0f} m before" in line
 
 
 def test_a_slide_on_most_laps_is_the_norm_not_an_incident():
@@ -109,8 +112,23 @@ def test_a_slide_on_most_laps_is_the_norm_not_an_incident():
     assert not (h["events"]["kind"] == "understeer").any()    # the tidy laps are not called understeer
     tend = h["tendency"].set_index("corner")["read"]
     assert tend["T4"] == "oversteer" and tend["T8"] == "oversteer"
+    # the steering residual alone is not enough: it is measured against a model fitted to the same session
+    assert not any("norm" in i["title"] for i in advice.suggest(s)["setup"]), "no body slip, no setup hypothesis"
+
+    # with the car measured travelling sideways at those exits, it is a setup hypothesis
+    corners = C.find_corners(s)
+    d = s.frame()["lap_distance"].to_numpy()
+    sliding = np.zeros(len(d), bool)
+    for c in corners[corners["corner"].isin(["T4", "T8"])].itertuples():
+        sliding |= (d >= c.start_m) & (d <= c.end_m)
+    s.derived["body_slip"] = np.where(sliding, 4.0, 0.5)
     setup = advice.suggest(s)["setup"]
-    assert any("norm" in i["title"] and "T4" in i["where"] and "T8" in i["where"] for i in setup)
+    item = next(i for i in setup if "norm" in i["title"])
+    assert "T4" in item["where"] and "T8" in item["where"] and any("Body slip" in e for e in item["evidence"])
+
+    # and with body slip measured small there, it is not
+    s.derived["body_slip"] = np.full(len(d), 0.6)
+    assert not any("norm" in i["title"] for i in advice.suggest(s)["setup"])
 
 
 def test_track_cut_is_reported(synthetic):

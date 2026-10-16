@@ -38,7 +38,7 @@ import numpy as np
 
 from . import maths
 from .maths import FormulaError, MathSet
-from .model import GAP_FACTOR, Event, SessionModel
+from .model import CONFIRMED, GAP_FACTOR, RECORDED, Event, SessionModel
 
 RULES_VERSION = 1
 _PREFIX = "__event_"
@@ -365,7 +365,7 @@ def detect(model: SessionModel, rules: RuleSet | None = None, fit: bool = False)
                 events.append(Event(kind=r.title, t_start=t0, t_end=t1, lap=lap.lap if lap else None, position_m=None,
                                     severity=level, channels=tuple(r.evidence), evidence=evidence,
                                     confidence=f"{r.confidence} — requires review", rule=r.id,
-                                    rule_version=f"{r.version}"))
+                                    rule_version=f"{r.version}", source="rule"))
                 kept += 1
             report[r.id] = {"ran": True, "events": kept, "message": f"{kept} found" if kept else "none found"}
     finally:
@@ -392,6 +392,73 @@ def _evidence_channel(model, results, name):
         return maths._lookup(model, name)
     except (KeyError, FormulaError):
         return None
+
+
+# iRacing's irsdk_IncidentFlags, low byte: the kinds named are the ones the SDK documents
+SIM_INCIDENT = {0x01: "loss of control", 0x02: "off track"}
+CONFIRM_WINDOW_S = 3.0        # a candidate within this of a recorded incident is confirmed by it
+
+
+def recorded_incidents(model: SessionModel) -> list:
+    """Incidents the source itself recorded — a simulator's incident system — as
+    events with status "recorded": a rise in the driver's incident count, named
+    from the incident flags; and a flagged event with no points."""
+    count = model.get("incident_count") if model.has("incident_count") else None
+    flags = model.get("incident_flags") if model.has("incident_flags") else None
+    if count is None and flags is None:
+        return []
+    dist = model.get("lap_distance") if model.has("lap_distance") else None
+
+    def code_near(t):
+        if flags is None:
+            return 0
+        a, b = np.searchsorted(flags.timestamps, [t - 0.5, t + 0.5])
+        v = np.asarray(flags.values[a:b], float)
+        v = v[np.isfinite(v) & (v != 0)]
+        return int(v[0]) if len(v) else 0
+
+    def make(t, points, code):
+        lap = next((x for x in model.laps if x.t_start <= t < x.t_end), None)
+        at = None
+        if dist is not None:
+            value, _ = dist.at([t])
+            at = float(value[0]) if np.isfinite(value[0]) else None
+        kind = SIM_INCIDENT.get(code & 0xFF, f"incident code {code & 0xFF}" if code else "incident")
+        return Event(kind=kind, t_start=float(t), t_end=float(t), lap=lap.lap if lap else None, position_m=at,
+                     severity="", channels=tuple(c for c in ("incident_count", "incident_flags") if model.has(c)),
+                     evidence={"points": float(points), "code": int(code)},
+                     confidence="recorded by the simulator", rule="simulator incident record", status=RECORDED,
+                     source="simulator")
+
+    out, taken = [], []
+    if count is not None:
+        t, v = count.timestamps, np.asarray(count.values, float)
+        for i in np.flatnonzero(np.diff(v) > 0) + 1:
+            out.append(make(t[i], v[i] - v[i - 1], code_near(t[i])))
+            taken.append(t[i])
+    if flags is not None:
+        t, v = flags.timestamps, np.asarray(flags.values, float)
+        for i in np.flatnonzero((v[1:] != v[:-1]) & (v[1:] != 0) & np.isfinite(v[1:])) + 1:
+            if all(abs(t[i] - x) > 1.0 for x in taken):
+                out.append(make(t[i], 0.0, int(v[i])))
+    return sorted(out, key=lambda e: e.t_start)
+
+
+def confirm_with_records(candidates: list, recorded: list, window_s: float = CONFIRM_WINDOW_S) -> int:
+    """Mark the candidates that a recorded incident with points backs up — the same
+    moment, within window_s — as confirmed, naming the record. Returns how many."""
+    n = 0
+    hits = [r for r in recorded if r.evidence.get("points", 0) > 0 or (r.evidence.get("code", 0) & 0xFF) in SIM_INCIDENT]
+    for e in candidates:
+        if e.status == RECORDED:
+            continue
+        for r in hits:
+            if r.t_start - window_s <= e.t_end and e.t_start <= r.t_end + window_s:
+                e.status = CONFIRMED
+                e.evidence["confirmed_by"] = f"{r.kind} recorded by the simulator at {r.t_start:.1f} s"
+                n += 1
+                break
+    return n
 
 
 def describe(event: Event) -> str:

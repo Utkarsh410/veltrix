@@ -83,7 +83,8 @@ _TYRE_BASES = ("tyre temp", "tire temp", "tyre temperature", "tire temperature",
                "tyre tair", "tyre core temp", "tire core temp")
 _ALL_ZONE_WORDS = frozenset(w for names in _ZONE_NAMES.values() for w in names)
 _TYRE_TEMP_EXCLUDE = frozenset({"pressure", "press", "pres", "psi", "bar", "wear", "load", "slip",
-                                "speed", "height", "brake", "air"})
+                                "speed", "height", "brake", "air", "rumble", "pitch", "vel", "defl", "odometer",
+                                "dp", "change", "changed", "set", "count", "compound", "type", "remaining"})
 
 
 def _corner_aliases(bases, corner, suffixes=("",)):
@@ -154,10 +155,23 @@ def _build() -> dict:
                    exclude=frozenset({"offset", "est", "estimate"})),
         ChannelDef("tc_active", "-", "Traction control intervening (0 / 1)", discrete=True,
                    aliases=("tc", "traction control", "tc active", "tc cut"),
-                   exclude=frozenset({"level", "setting", "map", "mode", "switch"})),
+                   # "dc…" is a driver-control dial (iRacing's dcTractionControl): a setting, never "intervening"
+                   exclude=frozenset({"level", "setting", "map", "mode", "switch", "dc", "dial", "knob"})),
+        # The car's own velocity components (iRacing's VelocityX / VelocityY). No name aliases: a
+        # "velocity x" column elsewhere is usually world-frame, which would make body slip nonsense.
+        ChannelDef("vel_x", "m/s", "Velocity along the car, forward positive (car frame)"),
+        ChannelDef("vel_y", "m/s", "Velocity across the car, left positive (car frame)"),
+        ChannelDef("on_kerb", "-", "The car is on a kerb (rumble strip), from the simulator's track surface",
+                   discrete=True),
+        ChannelDef("incident_count", "-", "Incident points the simulator has given the driver so far "
+                   "(iRacing's PlayerCarMyIncidentCount); a rise is an incident", discrete=True,
+                   aliases=("incident count", "my incident count", "driver incident count")),
+        ChannelDef("incident_flags", "-", "What the simulator reported for the latest incident (iRacing's "
+                   "PlayerIncidents: low byte the kind, high byte the penalty)", discrete=True,
+                   aliases=("player incidents", "incident flags")),
         ChannelDef("abs_active", "-", "ABS intervening (0 / 1)", discrete=True,
                    aliases=("abs", "abs active"),
-                   exclude=frozenset({"level", "setting", "map", "mode", "switch"})),
+                   exclude=frozenset({"level", "setting", "map", "mode", "switch", "dc", "dial", "knob", "cut", "pct"})),
         ChannelDef("pos_x", "m", "Position in the local track plane, x", "position",
                    aliases=("pos x", "position x", "world position x", "x pos", "gps x")),
         ChannelDef("pos_y", "m", "Position in the local track plane, y", "position",
@@ -200,6 +214,11 @@ def _build() -> dict:
     derived = [
         ChannelDef("lap_distance", "m", "Distance from the start/finish line, scaled to the common "
                    "lap length", kind="derived", requires=("time",)),
+        ChannelDef("body_slip", "deg", "Body slip angle: the angle between where the car points and where it "
+                   "travels, atan(vel_y / vel_x), above 5 m/s", kind="derived", requires=("vel_x", "vel_y")),
+        ChannelDef("acc_lat_sustained", "g", "Lateral acceleration held for a quarter of a second (rolling median "
+                   "over 0.25 s): what the tyres sustain, without the jolt of a kerb or a bump", kind="derived",
+                   sign="+ve in left-hand corners", requires=("acc_lat",)),
         ChannelDef("acc_long_calc", "g", "Longitudinal acceleration from d(speed)/dt, 15 Hz low-pass "
                    "(2 Hz when speed is recorded in coarse steps)",
                    kind="derived", sign="+ve accelerating", requires=("speed",)),

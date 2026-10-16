@@ -244,6 +244,12 @@ and grip**; **Data, events and limits** (the channel mapping with where each
 unit came from, maths channels, detected events, your notes, and the
 limitations of the report); **Import notes**.
 
+
+Braking points in the engineering report are given the way a driver reads them on track: metres
+**before the corner** (its turn-in), the distance the marker boards count down to — "117 m before the
+corner" — or "into the corner" when the brakes go on after the car has started to turn. Turn-in is one
+fixed point per corner, taken from a typical lap.
+
 ## What is not there yet
 
 A real, signed app bundle (the launchers are tied to this folder).

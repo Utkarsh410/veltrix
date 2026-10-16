@@ -47,12 +47,14 @@ import re
 import numpy as np
 import pandas as pd
 
+from .. import circuits
+from .. import events as event_rules
 from .. import corners as corner_engine
 from .. import laps as lap_engine
 from ..derived import best_lat
 from ..schema import CORNERS as WHEELS
 from ..schema import tyre_temp_channel
-from . import advice, balance, handling, tyres
+from . import advice, balance, handling, plausibility, tyres
 
 SECTIONS = (("lap_potential", "Lap potential"), ("driver_performance", "Driver performance"),
             ("braking", "Braking"), ("cornering", "Cornering"), ("traction", "Traction"),
@@ -114,6 +116,7 @@ class _Ctx:
     def __init__(self, session, corner_result, handling_result):
         s = self.session = session
         self.ch, self.frame = s.channels, s.frame()
+        self.incident_laps: dict = {}             # {corner: laps with an incident there}, filled once corners are known
         self.flying = list(s.laps.loc[s.laps["status"] == "flying", "lap"])
         self.n = len(self.flying)
         self.fly_rows = self.ch["lap"].isin(self.flying).to_numpy()
@@ -150,6 +153,22 @@ class _Ctx:
             self.handling = handling_result
         else:
             self.handling_reason = self.corner_reason
+        self.peaks = pd.DataFrame()
+        if self.corners is not None:
+            try:
+                self.peaks = plausibility.check_peaks(s, self.corners, self.flying or None)
+            except (ValueError, KeyError):
+                self.peaks = pd.DataFrame()
+            if len(self.peaks):
+                # a held peak no other measurement supports, or one beyond the car, is not used as a peak
+                bad = self.peaks[self.peaks["verdict"].isin(("unsupported", "beyond"))]
+                column = {"lateral": "peak_lat_g", "braking": "peak_brake_g"}
+                for r in bad.itertuples():
+                    rows = (self.metrics["lap"] == r.lap) & (self.metrics["corner"] == r.corner)
+                    self.metrics.loc[rows, column[r.kind]] = np.nan
+            for e in self.sim_incidents():
+                if e["points"] > 0 or (e["code"] & 0xFF) in SIM_INCIDENT:
+                    self.incident_laps.setdefault(e["corner"], set()).add(e["lap"])
         self.best_lap = lap_engine.best_lap(s) if self.n else None
         self.best_time = float(s.laps.loc[s.laps["lap"] == self.best_lap, "lap_time_s"].iloc[0]) if self.n else np.nan
 
@@ -190,9 +209,49 @@ class _Ctx:
         return {c: part[column].dropna() for c, part in self.metrics.groupby("corner", sort=False)}
 
     def best_and_typical(self, corner):
-        """A corner's fastest pass (by zone time) and its typical (median) pass."""
+        """A corner's fastest pass (by zone time) and its typical (median) pass.
+        A pass with a recorded incident (off track, say) is never the fastest
+        pass: a corner cut is not a reference to copy."""
         part = self.metrics[self.metrics["corner"] == corner]
-        return part.loc[part["zone_time_s"].idxmin()], part.median(numeric_only=True), part
+        clean = part[~part["lap"].isin(self.incident_laps.get(corner, ()))]
+        pick = clean if len(clean) else part
+        return pick.loc[pick["zone_time_s"].idxmin()], part.median(numeric_only=True), part
+
+    def sim_incidents(self) -> list:
+        """Incidents the simulator recorded: [{lap, corner, m, t, points, kind, code}], from
+        a rise in the incident count, or a reported incident with no points."""
+        ch = self.ch
+        if "incident_count" not in ch and "incident_flags" not in ch:
+            return []
+        t, lap = ch["time"].to_numpy(), ch["lap"].to_numpy()
+        dist = ch["lap_distance"].to_numpy() if "lap_distance" in ch else np.full(len(t), np.nan)
+        count = ch["incident_count"].to_numpy(float) if "incident_count" in ch else None
+        flags = ch["incident_flags"].to_numpy(float) if "incident_flags" in ch else None
+        out, seen = [], set()
+
+        def at(i, points):
+            code = int(flags[i]) if flags is not None and np.isfinite(flags[i]) else 0
+            if flags is not None and not code:            # the flag can trail the count by a few samples
+                window = flags[max(i - 30, 0):i + 31]
+                hits = window[np.isfinite(window) & (window != 0)]
+                code = int(hits[0]) if len(hits) else 0
+            corner = (self.corners["corner"].iloc[int(self.zone_of(np.array([dist[i]]))[0])]
+                      if self.corners is not None and np.isfinite(dist[i]) else "")
+            return {"lap": int(lap[i]), "corner": corner, "m": float(dist[i]), "t": float(t[i]), "points": points,
+                    "kind": SIM_INCIDENT.get(code & 0xFF, f"reported as code {code & 0xFF}" if code else "incident"),
+                    "code": code}
+
+        if count is not None:
+            rise = np.flatnonzero(np.diff(count) > 0) + 1
+            for i in rise:
+                out.append(at(i, float(count[i] - count[i - 1])))
+                seen.update(range(max(i - 60, 0), i + 61))
+        if flags is not None:
+            new = np.flatnonzero((flags[1:] != flags[:-1]) & (flags[1:] != 0) & np.isfinite(flags[1:])) + 1
+            for i in new:
+                if i not in seen:
+                    out.append(at(i, 0.0))
+        return sorted(out, key=lambda e: e["t"])
 
     def zone_of(self, lap_distance: np.ndarray) -> np.ndarray:
         ends = self.corners["zone_end_m"].to_numpy()
@@ -389,8 +448,11 @@ def _braking(c: _Ctx) -> list:
     how = ("where the brake first rises above "
            f"{corner_engine.BRAKE_ON_FRACTION:.0%} of its session maximum" if "brake" in c.ch else
            f"where deceleration first passes {-corner_engine.BRAKE_ON_G:g} g (the file has no brake channel)")
-    point_calc = (f"Braking point = {how}, in the braking phase that runs up to the corner's apex; metres from the "
-                  "start/finish line. ")
+    point_calc = (f"Braking point = {how}, in the braking phase that takes off the most speed before the corner's "
+                  "apex. That phase may start before the corner's zone does, and a release shorter than "
+                  f"{corner_engine.BRAKE_GAP_S:g} s does not end it. It is given in metres before the corner's turn-in, "
+                  "the distance a trackside marker board counts down to. Turn-in is one fixed point per corner: on the "
+                  f"typical lap, where lateral g first builds to {corner_engine.TURN_IN_SHARE:.0%} of the corner's peak. ")
     zones = [k for k, part in m.groupby("corner", sort=False) if part["brake_m"].notna().mean() >= 0.6]
     if not zones:
         return out
@@ -399,14 +461,18 @@ def _braking(c: _Ctx) -> list:
     loose = {k: v for k, v in scatter.items() if v >= BRAKE_SCATTER_M}
     if c.n >= 3:
         ranked = sorted(scatter.items(), key=lambda kv: -kv[1])
+        where = {k: float(m.loc[m["corner"] == k, "brake_before_m"].median()) for k in zones}
         evidence = [f"{k}: braking point moves by ±{v:.0f} m" for k, v in ranked[:4]]
+        # every braking zone's reference, as the driver finds it on track
+        evidence.append("Typical braking points: " + "; ".join(f"{k} {corner_engine.before_corner(where[k])}" for k in zones))
         if loose:
             out.append(_finding(
                 f"The braking point is not repeatable into {_join(loose)}", evidence,
                 point_calc + f"Scatter = standard deviation over the flying laps; {BRAKE_SCATTER_M:.0f} m or more is raised.",
                 c.conf(caps=[] if "brake" in c.ch else [("medium", "braking is inferred from deceleration, not a pedal channel")]),
-                f"Fix a braking reference for {_join(loose)} before looking for a later braking point: at these speeds "
-                f"±{max(loose.values()):.0f} m is more than the gain being chased.", _join(loose)))
+                f"Fix a braking reference for {_join(loose)} before looking for a later braking point — "
+                + "; ".join(f"{k}: brake at {corner_engine.before_corner(where[k])} every lap" for k in loose)
+                + f". At these speeds ±{max(loose.values()):.0f} m is more than the gain being chased.", _join(loose)))
         else:
             out.append(_finding(
                 f"Braking points repeat to within ±{ranked[0][1]:.0f} m in all {len(zones)} braking zones", evidence,
@@ -421,20 +487,21 @@ def _braking(c: _Ctx) -> list:
         d = best["brake_m"] - typical["brake_m"]
         avail = float(c.summary.loc[c.summary["corner"] == k, "available_s"].iloc[0])
         if np.isfinite(d) and d >= BRAKE_M and avail >= MIN_GAIN_S:
-            later.append((k, d, typical["brake_m"], best["brake_m"], avail, scatter[k], int(best["lap"])))
+            later.append((k, d, typical["brake_before_m"], best["brake_before_m"], avail, scatter[k], int(best["lap"])))
             gain += avail
     if later:
         later.sort(key=lambda r: -r[4])
         out.append(_finding(
             f"The fastest pass braked later into {_join(r[0] for r in later)}",
-            [f"{k}: typically brakes at {typ:.0f} m, on the fastest pass (lap {lap}) at {best:.0f} m — {d:.0f} m later; "
+            [f"{k}: typically brakes {corner_engine.before_corner(typ)}, on the fastest pass (lap {lap}) "
+             f"{corner_engine.before_corner(best)} — {d:.0f} m later; "
              f"{avail:.2f} s available in the zone" for k, d, typ, best, avail, _, lap in later],
             point_calc + BEST_VS_TYPICAL + f"A difference of {BRAKE_M:.0f} m or more is raised, where the zone holds at "
             f"least {MIN_GAIN_S:g} s. The time is the whole zone's, so braking explains part of it, not all.",
             c.conf(effect=float(np.mean([r[1] for r in later])), scatter=float(np.mean([r[5] for r in later])),
                    caps=[("medium", "the later braking point went with a faster zone; that does not prove it caused it")]),
             "Move the braking point later in steps of about 5 m: "
-            + "; ".join(f"{k} toward {best:.0f} m" for k, _, _, best, *_ in later)
+            + "; ".join(f"{k} toward {corner_engine.before_corner(best)}" for k, _, _, best, *_ in later)
             + ". Keep the step only if minimum speed and exit speed hold.",
             _join(r[0] for r in later), at_stake_s=gain))
 
@@ -449,7 +516,10 @@ def _braking(c: _Ctx) -> list:
         soft = [h for h in heavy if h[1] < DECEL_SHARE * h[2] and h[2] - h[1] >= DECEL_GAP_G]
         hardest = max(heavy, key=lambda h: h[2])
         evidence = [f"{k}: typical peak {med:.2f} g, best {top:.2f} g ({med / top:.0%})" for k, med, top, _ in heavy[:6]]
-        calc = ("Peak deceleration = the largest value of d(speed)/dt, low-pass filtered, within the braking phase. "
+        source = ("the measured longitudinal acceleration" if "acc_long" in c.ch and c.ch["acc_long"].notna().any()
+                  else "d(speed)/dt, low-pass filtered")
+        calc = (f"Peak deceleration = the largest value of {source} held over {corner_engine.PEAK_G_SAMPLES} samples "
+                "of the distance grid, within the braking phase. "
                 "Each zone is compared with its own best, not with the hardest stop of the lap, because downforce "
                 f"makes a fast stop harder than a slow one. Zones shedding less than {HEAVY_BRAKE_KMH:.0f} km/h are left out.")
         conf = c.conf(uses=("speed",), effect=float(np.mean([h[2] - h[1] for h in heavy])),
@@ -834,10 +904,24 @@ def _balance(c: _Ctx) -> tuple[list, str | None]:
                                            "whether the whole car is balanced")])
             if traits:
                 text = _join(f"{'understeer' if v > 0 else 'oversteer'} at {p} of {kind} corners ({v:+.0f} deg)" for kind, p, v in traits)
-                out.append(_finding(
-                    f"Balance by phase: {text}", evidence, calc, conf,
-                    "These are habits of the car, the same every lap. They are the first place to aim a setup change: "
-                    "see the setup hypotheses.", _join(sorted({k for k, *_ in traits})) + " corners"))
+                # an oversteer trait read from the steering is checked against the car actually travelling sideways
+                slip = advice.exit_slip(s, c.corners, list(t["corner"]))
+                verdict = ("These are habits of the car, the same every lap. They are the first place to aim a setup "
+                           "change: see the setup hypotheses.")
+                if slip and any(v < 0 for *_, v in traits):
+                    exits = {k: v[1] for k, v in slip.items() if np.isfinite(v[1])}
+                    worst = max(exits.values()) if exits else np.nan
+                    evidence.append("Body slip at corner exit, median over flying laps: "
+                                    + ", ".join(f"{k} {v:.1f} deg" for k, v in sorted(exits.items(), key=lambda kv: -kv[1])[:6]))
+                    if np.isfinite(worst) and worst < advice.HABIT_SLIP_DEG:
+                        verdict = (f"The oversteer read here is not the car sliding: body slip stays under "
+                                   f"{advice.HABIT_SLIP_DEG:g} deg at every exit. It is how this session's steering model "
+                                   "fits the car in those phases (a residual against the car's own norm, not a balance "
+                                   "measurement). Do not change the setup for it; use the figures as a baseline to compare "
+                                   "a later session with.")
+                        conf = {"level": conf["level"], "basis": conf["basis"] + "; checked against measured body slip"}
+                out.append(_finding(f"Balance by phase: {text}", evidence, calc, conf, verdict,
+                                    _join(sorted({k for k, *_ in traits})) + " corners"))
             else:
                 out.append(_finding(
                     "The balance is the same through entry, apex and exit in every type of corner", evidence, calc, conf,
@@ -867,24 +951,162 @@ def _balance(c: _Ctx) -> tuple[list, str | None]:
                  if moving else "The balance is stable over a run. Tyre wear is not shifting it."), "whole lap"))
 
     if all(f"susp_travel_{w}" in c.ch for w in WHEELS) and "lltd_front" in c.frame and c.frame["lltd_front"].notna().any():
-        lltd = float(c.frame.loc[c.fly_rows, "lltd_front"].mean())
-        static = s.vehicle.front_weight_dist
-        out.append(_finding(
-            f"The front axle carries {lltd:.0%} of the lateral load transfer",
-            [f"Front share of lateral load transfer {lltd:.1%} above 0.5 g on flying laps",
-             f"Static front weight {static:.1%}"],
-            "Load transfer per axle = wheel rate × (left − right damper travel) ÷ 2, front as a share of front plus "
-            f"rear. Wheel rates used: front {s.vehicle.wheel_rate_front_N_mm:g}, rear {s.vehicle.wheel_rate_rear_N_mm:g} N/mm.",
-            c.conf(caps=[("low", "the wheel rates are the configured defaults, not this car's; the share scales with them")]),
-            ("A front share above the static front weight pushes the car toward understeer, below it toward oversteer. "
-             "Enter the car's real wheel rates before using this figure to choose bars or springs."), "whole lap"))
+        v = s.vehicle
+        static = (f"Static front weight {v.front_weight_dist:.1%} ({v.origin('front_weight_dist')})"
+                  if v.known("front_weight_dist") else "Static front weight not known (no setup in the file, none stated)")
+        lat = c.frame["acc_lat"] if "acc_lat" in c.frame else c.frame.get("acc_lat_calc")
+        roll = []
+        if lat is not None:
+            ay = lat.to_numpy(float)
+            cornering = c.fly_rows & (np.abs(ay) > 0.5)
+            for axle, (left, right) in (("front", ("fl", "fr")), ("rear", ("rl", "rr"))):
+                diff = (c.ch[f"susp_travel_{right}"] - c.ch[f"susp_travel_{left}"]).to_numpy(float) / 2.0
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    per_g = np.abs(diff[cornering] / ay[cornering])
+                if np.isfinite(per_g).any():
+                    roll.append((axle, float(np.nanmedian(per_g))))
+        roll_text = [f"Roll at the {a} dampers: {mm:.1f} mm of left–right difference (half) per g" for a, mm in roll]
+        if v.known("wheel_rate_front_N_mm") and v.known("wheel_rate_rear_N_mm"):
+            lltd = float(c.frame.loc[c.fly_rows, "lltd_front"].mean())
+            out.append(_finding(
+                f"The front axle carries {lltd:.0%} of the lateral load transfer",
+                [f"Front share of lateral load transfer {lltd:.1%} above 0.5 g on flying laps", static] + roll_text,
+                "Load transfer per axle = wheel rate × (left − right damper travel) ÷ 2, front as a share of front plus "
+                f"rear. Wheel rates: front {v.wheel_rate_front_N_mm:g} N/mm ({v.origin('wheel_rate_front_N_mm')}), "
+                f"rear {v.wheel_rate_rear_N_mm:g} N/mm ({v.origin('wheel_rate_rear_N_mm')}).",
+                c.conf(),
+                ("A front share above the static front weight pushes the car toward understeer, below it toward oversteer."
+                 if v.known("front_weight_dist") else
+                 "Compare it with the car's static front weight once that is known: above it pushes toward understeer, "
+                 "below it toward oversteer."), "whole lap"))
+        elif roll:
+            out.append(_finding(
+                "The front/rear split of lateral load transfer cannot be stated without this car's wheel rates",
+                roll_text + [static],
+                "Damper roll is measured: half the left–right difference in damper travel, per g of lateral acceleration, "
+                "median over flying laps above 0.5 g. Turning it into load needs each axle's roll wheel rate (spring rate "
+                "× motion ratio² plus the anti-roll bar), which neither the file nor the import gives. With assumed rates "
+                "the split would only repeat the assumption, so none is given.",
+                {"level": "high", "basis": "measured damper travel; the split itself is withheld"},
+                "Enter the front and rear roll wheel rates (--wheel-rate-front / --wheel-rate-rear, or the car settings) "
+                "to get the split. The damper roll above is still useful on its own: compare it between setups.",
+                "whole lap"))
     return out, None
 
 
 # ── 8. incidents ──────────────────────────────────────────────────────────────
 
+def _peak_check(c: _Ctx) -> list:
+    """Every acceleration peak the report uses, checked: held, confirmed by an
+    independent measurement, within the car's stated grip."""
+    p = c.peaks
+    if p is None or not len(p):
+        return []
+    flagged = p[p["verdict"] != "ok"].sort_values("peak_g", ascending=False)
+    by = flagged["verdict"].value_counts()
+    words = {"kerb": "kerb strikes", "bump": "bumps", "spike": "single-sample spikes", "jolt": "jolts not held",
+             "unsupported": "held but not supported by an independent measurement", "beyond": "beyond the stated grip limit"}
+    evidence = [f"{len(p) - len(flagged)} of {len(p)} corner peaks (lateral and braking, flying laps) are held for a quarter "
+                "of a second" + (" and agree with an independent measurement" if p["independent_g"].notna().any() else "")]
+    if len(flagged):
+        evidence.append("Set aside: " + ", ".join(f"{n} {words.get(k, k)}" for k, n in by.items()))
+        for r in flagged.head(6).itertuples():
+            vert = f", vertical {r.vertical_g:.2f} g" if np.isfinite(r.vertical_g) else ""
+            evidence.append(f"Lap {r.lap}, {r.corner} {r.kind} at {r.m:.0f} m: {r.peak_g:.2f} g for an instant, "
+                            f"{r.held_g:.2f} g held{vert} — {r.reason}")
+    calc = (f"For each corner pass the instantaneous peak is set against the same acceleration held for a quarter of a "
+            f"second (rolling median). More than {plausibility.TRANSIENT_G:g} g above it is a jolt: a kerb strike when the "
+            f"simulator's surface says kerb, a bump when vertical g is more than {plausibility.BUMP_G:g} g from 1, a "
+            "spike when one sample stands alone. The held value is then checked against an independent measurement — "
+            "yaw rate × speed for lateral g, d(speed)/dt for deceleration — and more than "
+            f"{plausibility.CORROBORATE_G:g} g above it is not supported. Peak figures in this report are held values; "
+            "unsupported ones are left out.")
+    unsupported = int(by.get("unsupported", 0) + by.get("beyond", 0))
+    return [_finding(
+        (f"Acceleration peaks hold up: {len(p) - len(flagged)} of {len(p)} are held and corroborated" if not len(flagged) else
+         f"{len(flagged)} of {len(p)} acceleration peaks are not the car's grip"
+         + (f", {unsupported} of them left out of the peak figures" if unsupported else
+            " — jolts the held peak figures already leave out")),
+        evidence, calc, {"level": "high", "basis": "checked against the held value and an independent measurement"},
+        ("Peak g figures here can be read as the car's." if not len(flagged) else
+         "Read peak g figures as held values. A kerb strike or bump that keeps recurring in one corner is worth "
+         "checking on video: it is load the suspension takes, even though it is not grip."), "every corner")]
+
+
+def _corner_check(c: _Ctx) -> list:
+    """Where the corner zones every per-corner finding uses came from, and how
+    they compare with the circuit's own definition when there is one."""
+    corners = c.corners
+    if corners is None or not len(corners):
+        return []
+    attrs, source = corners.attrs, corners.attrs.get("source", "")
+    check = attrs.get("validation")
+    calc = ("Each official turn in the circuit file is looked for among the corners found in the data alone "
+            f"(the cornering signal, with no circuit file): a found corner overlaps the turn's span to within "
+            f"{circuits.MATCH_SLACK_M:.0f} m and turns the same way. Offsets are the found corner's start and end "
+            "against the file's, after scaling the file to this session's lap length.")
+    if check and "turns" in check:
+        missing = [r["turn"] for r in check["turns"] if not (r["found"] and r.get("direction_agrees"))]
+        evidence = [f"{check['found']} of {check['total']} turns of '{attrs.get('track')}' are found in the data"]
+        offs = [r for r in check["turns"] if r["found"]]
+        if offs:
+            worst = max(offs, key=lambda r: abs(r["start_offset_m"]) + abs(r["end_offset_m"]))
+            evidence.append(f"Largest offset: {worst['turn']} — the data's corner starts {worst['start_offset_m']:+.0f} m "
+                            f"and ends {worst['end_offset_m']:+.0f} m from the file's")
+        if missing:
+            evidence.append("Not found in the data: " + _join(missing))
+        for found, turns in check["merged"].items():
+            evidence.append(f"{_join(turns)} are one corner in the data (taken in one movement)")
+        if check["extra"]:
+            evidence.append("Corners in the data that no turn of the file accounts for: " + _join(check["extra"]))
+        good = not missing and not check["extra"]
+        return [_finding(
+            (f"Corner zones are the circuit's own, and the data confirms all {check['total']} turns" if good else
+             f"Corner zones are the circuit's own; the data confirms {check['found']} of {check['total']} turns"),
+            evidence, calc, {"level": "high" if good else "medium", "basis": "official turns checked against the data"},
+            ("Corner numbers and names in this report are the circuit's." if good else
+             "Corner numbers and names are the circuit's, but check the turns listed above on the track map before "
+             "relying on findings about them: the file and this session's data disagree there."), "every corner")]
+    tried = attrs.get("tried") or []
+    evidence = [f"{len(corners)} corners found from {source}"]
+    if attrs.get("track_note"):
+        evidence.append(attrs["track_note"])
+    elif not tried:
+        venue = c.session.raw.info.get("Venue", "")
+        evidence.append(f"No circuit file for {venue!r}" if venue else "The file names no venue, so no circuit file could be chosen")
+    return [_finding(
+        "Corner zones are inferred from the data, not checked against a circuit definition", evidence,
+        "Corners are where the cornering signal rises clear of the straights, numbered T1, T2, … in lap order from the "
+        "start/finish line. They are not the circuit's official numbers or names, and a chicane may be one corner or "
+        "two depending on how it is driven.",
+        {"level": "medium", "basis": "inferred from this session's data"},
+        "Read corner numbers as this report's own. To use the circuit's, add a circuit file for the venue "
+        "(`veltrix circuit FILE` drafts one from this session for you to number and name).", "every corner")]
+
+
+SIM_INCIDENT = event_rules.SIM_INCIDENT       # iRacing's incident kinds, as the event engine names them
+
+
 def _incidents(c: _Ctx) -> list:
     s, out = c.session, []
+    recorded = c.sim_incidents()
+    if recorded:
+        with_points = [e for e in recorded if e["points"] > 0]
+        evidence = [f"Lap {e['lap']}, {e['corner']} at {e['m']:.0f} m: {e['kind']}"
+                    + (f", {e['points']:g}x" if e["points"] else ", no incident points") for e in recorded[:10]]
+        laps_hit = sorted({e["lap"] for e in with_points})
+        out.append(_finding(
+            (f"The simulator recorded {len(with_points)} incident{'s' if len(with_points) != 1 else ''}"
+             + (f" — on lap{'s' if len(laps_hit) > 1 else ''} {_join(laps_hit)}" if laps_hit else "")
+             if with_points else f"The simulator flagged {len(recorded)} event{'s' if len(recorded) != 1 else ''} with no incident points"),
+            evidence,
+            "Read from the simulator's own incident channels: a rise in the driver's incident count is an incident, "
+            "named from the incident flags (low byte the kind, high byte the penalty). A flagged event without points "
+            "is listed but not counted. A corner pass with an incident is never used as that corner's fastest pass.",
+            {"level": "high", "basis": "recorded by the simulator, not inferred"},
+            "Look at each one on the track map and video. An off-track that gained time is a corner cut to drop from "
+            "comparisons; one that lost time is a mistake to understand before it is repeated.",
+            _join(sorted({e["corner"] for e in recorded if e["corner"]})), None))
     if c.handling is not None:
         ev, model = c.handling["events"], c.handling["model"]
         calc = ("An incident is a stretch where the steering applied differs from what this car normally needs at "
@@ -893,20 +1115,33 @@ def _incidents(c: _Ctx) -> list:
                 f"{handling.COUNTER_STEER_DEG:g} deg. More steering than normal is understeer, less is oversteer. Cost = "
                 "the lap's time through that zone minus the typical time.")
         if len(ev):
+            recorded = [e for e in c.sim_incidents() if e["points"] > 0 or (e["code"] & 0xFF) in SIM_INCIDENT]
+
+            def backed(e):
+                """A recorded incident on the same lap, in the same corner: the candidate is confirmed by it."""
+                return next((r for r in recorded if r["lap"] == e.lap and r["corner"] == e.corner), None)
             n_us, n_os = int((ev["kind"] == "understeer").sum()), int((ev["kind"] == "oversteer").sum())
+            n_conf = sum(backed(e) is not None for e in ev.itertuples())
             strong = ev[ev["severity"] != "mild"].sort_values("cost_s", ascending=False)
             cost = ev.groupby(["lap", "corner"])["cost_s"].first()
             total = float(cost[cost > 0].sum())
-            evidence = [f"{n_us} understeer and {n_os} oversteer incidents on {ev['lap'].nunique()} laps; "
-                        f"{int((ev['severity'] == 'severe').sum())} severe, {int((ev['severity'] == 'moderate').sum())} moderate"]
+            evidence = [f"{n_us} understeer and {n_os} oversteer candidates on {ev['lap'].nunique()} laps; "
+                        f"{int((ev['severity'] == 'severe').sum())} severe, {int((ev['severity'] == 'moderate').sum())} moderate"
+                        + (f"; {n_conf} confirmed by a simulator record" if recorded else
+                           "; none can be confirmed — the file has no incident record")]
             for e in strong.head(6).itertuples():
                 lock = f", {e.opposite_lock_deg:.0f} deg of opposite lock" if e.counter_steer else ""
                 paid = f", {e.cost_s:+.2f} s in the zone" if np.isfinite(e.cost_s) else ""
+                rec = backed(e)
+                status = f" — confirmed: {rec['kind']} recorded by the simulator" if rec else " — candidate"
                 evidence.append(f"Lap {e.lap}, {e.corner} {e.phase} at {e.peak_m:.0f} m: {e.severity} {e.cause}{lock}, "
-                                f"{e.duration_s:.1f} s at {e.speed:.0f} km/h{paid}")
+                                f"{e.duration_s:.1f} s at {e.speed:.0f} km/h{paid}{status}")
             busiest = ev["corner"].value_counts()
             out.append(_finding(
-                f"{len(ev)} balance incidents, most of them in {busiest.index[0]}", evidence, calc,
+                (f"{len(ev)} balance-incident candidates inferred from the steering, most of them in {busiest.index[0]}"
+                 + (f" — {n_conf} confirmed by a simulator record" if n_conf else " — none confirmed")), evidence,
+                calc + " These are inferred candidates: a recorded incident (the simulator's own) on the same lap and "
+                "in the same corner confirms one; otherwise it is for review.",
                 c.conf(uses=("acc_lat", "speed"),
                        caps=[("medium", "checked against staged incidents and one simulator session, not against a driver's notes")]),
                 f"Start with {busiest.index[0]} ({busiest.iloc[0]} incidents). "
@@ -964,6 +1199,23 @@ def _incidents(c: _Ctx) -> list:
                 c.conf(n=None, caps=[("medium", "a sensor glitch looks the same as a lock-up")]),
                 "A sharp rise on one front tyre under braking is a lock-up: check that corner's braking on that lap, and "
                 "the tyre for a flat spot.", _join(sorted({e.corner.upper() for e in at_speed.itertuples()}))))
+
+    out += _corner_check(c)
+    out += _peak_check(c)
+    counted = s.count_lines() if hasattr(s, "count_lines") else []
+    if counted:
+        k = s.counts
+        changed = (k["rows_in_file"] - k["rows_used"]) + sum(k.get("blanked", {}).values())
+        out.append(_finding(
+            f"{k['rows_used']:,} of {k['rows_in_file']:,} logged rows were used; {k['samples_analysed']:,} samples analysed",
+            counted,
+            "Counted at each step of the import, in order: rows the reader returned, rows dropped for a missing or "
+            "repeated time stamp, samples blanked as glitches, then the samples on the analysis clock. Figures in this "
+            "report are computed on the analysed samples.",
+            {"level": "high", "basis": "counted during the import"},
+            ("Nothing was changed in the logged data." if not changed else
+             f"{changed:,} logged values were dropped or blanked; the findings do not rest on them. Check the logger if "
+             "the share grows."), "the file"))
 
     warnings = s.warnings()
     if warnings:
@@ -1127,6 +1379,8 @@ def analyse(session, corner_result: dict | None = None, handling_result: dict | 
             f["interpretation"], f["investigation"] = f["conclusion"], f["recommendation"]
             # what kind of statement each finding is (model.LABELS)
             f["label"] = ("hypothesis/recommendation" if sid == "setup_hypotheses" else
+                          "recorded event" if sid == "incidents" and "simulator recorded" in f["conclusion"] else
+                          "detected event (candidate)" if sid == "incidents" and "candidate" in f["conclusion"] else
                           "detected event" if sid == "incidents" and "incident" in f["conclusion"] else "interpretation")
         sections.append({"id": sid, "title": title, "findings": findings,
                          "not_assessed": reason if not findings else None,      # nothing could be said

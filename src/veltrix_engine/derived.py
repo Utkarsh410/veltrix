@@ -19,6 +19,7 @@ from .vehicle import G, VehicleParams
 
 CORNERING_G = 0.3     # oversteer metric is only defined above this lateral g
 LLTD_MIN_G = 0.5      # load transfer split is only reported above this lateral g
+SUSTAIN_S = 0.25      # sustained acceleration: the median over this long, centred
 COARSE_SPEED_CUTOFF_HZ = 2.0    # d(speed)/dt filter when speed is recorded in coarse steps
 ROLL_CUTOFF_HZ = 5.0            # bandwidth of lateral g rebuilt from damper roll
 ROLL_MIN_SPEED_KMH = 60.0       # calibrate above this speed, away from pit-lane and kerb crawling
@@ -124,10 +125,17 @@ def compute_derived(channels: pd.DataFrame, fs_hz: float, vehicle: VehicleParams
     else:
         notes.append("No speed channel — no derived channels that depend on speed.")
 
+    if has("vel_x", "vel_y"):
+        # Body slip from the car-frame velocities: how far the car travels sideways of where it points
+        vx, vy = arr("vel_x"), arr("vel_y")
+        with np.errstate(invalid="ignore"):
+            out["body_slip"] = np.where(vx > 5.0, np.degrees(np.arctan2(vy, vx)), np.nan)
+
     if "acc_long_calc" in out:
         # A reset to the pits or a dropped sample makes speed jump; that is not an acceleration
         jump = out["acc_long_calc"].abs() > MAX_LONG_G
         if jump.any():
+            out.attrs.setdefault("bridged", {})["acc_long_calc"] = int(jump.sum())
             out.loc[jump, "acc_long_calc"] = np.nan
             out["acc_long_calc"] = out["acc_long_calc"].interpolate(limit_direction="both")
             notes.append(f"acc_long_calc: {int(jump.sum())} samples above {MAX_LONG_G:g} g come from jumps in the speed "
@@ -208,4 +216,9 @@ def compute_derived(channels: pd.DataFrame, fs_hz: float, vehicle: VehicleParams
     elif not has("acc_lat"):
         notes.append("No lateral acceleration channel — balance, load transfer and grip "
                      "utilisation are not computed.")
+    lat_id = "acc_lat_rebuilt" if "acc_lat_rebuilt" in out else "acc_lat" if has("acc_lat") else None
+    if lat_id:
+        # what the tyres hold, not the jolt of a kerb: a quarter of a second's median
+        lat = out[lat_id] if lat_id in out else channels[lat_id]
+        out["acc_lat_sustained"] = lat.rolling(max(int(round(SUSTAIN_S * fs_hz)), 1), center=True, min_periods=1).median()
     return out, notes, rebuilt

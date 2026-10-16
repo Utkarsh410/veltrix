@@ -41,6 +41,7 @@ REPEAT_SHARE = 0.25           # an imbalance on this share of laps in a corner i
 PATTERN_MIN_EVENTS = 5        # ... and across the car, at least this many incidents
 BRAKE_TEMP_WATCH_C = 750.0    # peak disc temperature worth checking against the pad/disc range
 TEMP_SPLIT_C = 8.0            # front-rear or left-right tyre temperature split worth acting on
+HABIT_SLIP_DEG = 2.0          # body slip at exit this large confirms an oversteer habit read from the steering
 CAMBER_SPREAD_C = (5.0, 15.0)     # inner-minus-outer surface temperature: outside this, look at camber
 
 
@@ -87,11 +88,13 @@ def _driver_items(session, corners, metrics, summary, events) -> list:
         d_exit = best["exit_speed"] - typical["exit_speed"]
         if np.isfinite(d_brake) and d_brake >= BRAKE_M:
             actions.append(f"brake about {d_brake:.0f} m later")
-            evidence.append(f"Braking point typically {typical['brake_m']:.0f} m, on the best pass {best['brake_m']:.0f} m")
+            evidence.append(f"Braking point typically {corner_engine.before_corner(typical['brake_before_m'])}, "
+                            f"on the best pass {corner_engine.before_corner(best['brake_before_m'])}")
         elif np.isfinite(d_brake) and d_brake <= -BRAKE_M and d_min >= SPEED_KMH:
             actions.append(f"brake about {-d_brake:.0f} m earlier and carry about {d_min:.0f} km/h more through the apex "
                            "(the best pass braked earlier and was faster there)")
-            evidence.append(f"Braking point typically {typical['brake_m']:.0f} m, on the best pass {best['brake_m']:.0f} m")
+            evidence.append(f"Braking point typically {corner_engine.before_corner(typical['brake_before_m'])}, "
+                            f"on the best pass {corner_engine.before_corner(best['brake_before_m'])}")
             evidence.append(f"Minimum speed typically {typical['min_speed']:.0f} km/h, on the best pass {best['min_speed']:.0f} km/h")
             d_min = 0.0                                   # already said
         if d_min >= SPEED_KMH:
@@ -182,6 +185,26 @@ def _driver_items(session, corners, metrics, summary, events) -> list:
 
 # ── setup ─────────────────────────────────────────────────────────────────────
 
+def exit_slip(session, corners, names: list) -> dict:
+    """Median |body slip| at the apex and in the exit of each named corner over
+    the flying laps: {corner: (apex_deg, exit_deg)}. Empty without body slip."""
+    frame = session.frame()
+    if "body_slip" not in frame or not frame["body_slip"].notna().any() or corners is None:
+        return {}
+    flying = session.laps.loc[session.laps["status"] == "flying", "lap"]
+    on = frame["lap"].isin(flying).to_numpy()
+    d, slip = frame["lap_distance"].to_numpy(), np.abs(frame["body_slip"].to_numpy())
+    out = {}
+    for c in corners[corners["corner"].isin(names)].itertuples():
+        apex = getattr(c, "apex_m", (c.start_m + c.end_m) / 2)
+        span = max(c.end_m - c.start_m, 40.0) * 0.15
+        a = on & (np.abs(d - apex) <= span)
+        e = on & (d > apex + span) & (d <= c.end_m)
+        out[c.corner] = (float(np.nanmedian(slip[a])) if a.any() else np.nan,
+                         float(np.nanmedian(slip[e])) if e.any() else np.nan)
+    return out
+
+
 def _setup_items(session, corners, handling_result) -> list:
     items = []
     frame = session.frame()
@@ -260,13 +283,20 @@ def _setup_items(session, corners, handling_result) -> list:
                                "Directions to test: " + "; ".join(actions) + ".",
                                "medium" if len(us) >= 2 * PATTERN_MIN_EVENTS else "low", priority=len(us)))
 
-    # Exit oversteer that is the norm rather than an incident
+    # Exit oversteer that is the norm rather than an incident. The steering residual is measured
+    # against a model fitted to this same session, so a residual that is the same every lap may be
+    # how the model fits the car rather than the car's balance. It becomes a setup hypothesis only
+    # when the car is measured travelling sideways there: body slip at those exits.
     habit = tendency[tendency["read"] == "oversteer"] if tendency is not None else []
-    if len(habit) >= 2 and not any(i["title"] == "Rear traction on corner exit" for i in items):
+    slip = exit_slip(session, corners, list(habit["corner"])) if len(habit) else {}
+    confirmed = [r for r in habit.itertuples() if slip.get(r.corner, (np.nan, np.nan))[1] >= HABIT_SLIP_DEG] if len(habit) else []
+    if len(confirmed) >= 2 and not any(i["title"] == "Rear traction on corner exit" for i in items):
         items.append(_item(
-            "setup", "Oversteer is the car's norm in several corners", _fmt_list(habit["corner"]),
+            "setup", "Oversteer is the car's norm in several corners", _fmt_list([r.corner for r in confirmed]),
             ["Typical steering against the car's own norm at exit: "
-             + ", ".join(f"{r.corner} {r.exit_deg:+.0f} deg" for r in habit.itertuples() if np.isfinite(r.exit_deg))],
+             + ", ".join(f"{r.corner} {r.exit_deg:+.0f} deg" for r in confirmed if np.isfinite(r.exit_deg)),
+             "Body slip at exit, median over flying laps: "
+             + ", ".join(f"{r.corner} {slip[r.corner][1]:.1f} deg (apex {slip[r.corner][0]:.1f})" for r in confirmed)],
             "Directions to test: soften the rear anti-roll bar; soften the rear springs; lower the rear tyre "
             "pressures slightly if they are above target when hot; raise the traction control setting one step.",
             "low", priority=len(habit)))
