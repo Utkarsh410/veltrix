@@ -42,7 +42,7 @@ and hands it to one module per format. Every module returns the same
 |---|---|---|
 | `csv_importer` | CSV exports of any logger | |
 | `motec` | MoTeC `.ld`, beacons from `.ldx` | multi-rate |
-| `iracing` | `.ibt` | single rate; the SDK's "%" labels on 0–1 values are dropped |
+| `iracing` | `.ibt` | single rate; every float the SDK labels "%" is stored 0–1 and is scaled to 0–100 at import (full scale reads 1.00000012 as a 32-bit float) |
 | `vbox` | `.vbo` | decodes the VBOX clock and minute-based coordinates; beacons from the stored start/finish line |
 | `aim` | `.xrk` `.xrz` `.drk` via `libxrk` | multi-rate; beacons from the logger's lap table |
 | `mdf` | MDF 3 / 4 via `asammdf` | multi-rate; raw CAN bus logging decoded with a DBC |

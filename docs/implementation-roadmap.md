@@ -288,6 +288,17 @@ Lap comparison tab and build the lap selection on the left of the main window.
 - Not in it (differences from the reference): values only for drawn channels; no colour-by-value legend, no
   "'Per Lap' Color", no User Profiles tab; one session at a time.
 
+## Throttle scaling on iRacing files — fixed 2026-10-16
+
+Reported by the user after an independent parse of a real `.ibt` (Toyota GR86, Spa) confirmed speed, g,
+steering, pressure, wheel-speed and shock conversions but found throttle wrong. Cause: iRacing stores pedals
+0–1 in 32-bit floats, so a flat pedal reads 1.00000012; the importer dropped the "%" label and the engine only
+scaled to % when the maximum was ≤ 1.0, so 25 samples just above 1 kept throttle (and brake) at 0–1. Every
+coasting, full-throttle and throttle pick-up figure was wrong (coasting 147 s a lap → 7.4 s; full throttle
+0% → 71%). Fix: `importers/iracing.py` scales every "%" float ×100 and keeps the label; `session._is_fraction`
+allows 1e-3 above 1 for any other format. Tests: `test_iracing_ibt` (real full-scale value),
+`test_a_pedal_logged_as_a_float32_fraction_is_still_read_as_a_fraction`.
+
 ## Open items carried forward
 
 | Item | Rule | Planned in |

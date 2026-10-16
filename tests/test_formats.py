@@ -259,10 +259,13 @@ def test_ld_with_unknown_encoding_keeps_the_rest(tmp_path, ref):
 
 def test_iracing_ibt(tmp_path, ref, logger):
     n = len(ref)
+    # iRacing writes a flat pedal as the 32-bit float just above 1, as real files show (1.00000012)
+    pedal = (ref["throttle"] / 100).to_numpy(np.float64, copy=True)
+    pedal[pedal >= 1.0] = float(np.nextafter(np.float32(1), np.float32(2)))
     variables = [("SessionTime", "double", "s", ref["time"]), ("Speed", "float", "m/s", ref["speed"] / 3.6),
                  ("Lap", "int", "", ref["lap"]), ("LapDist", "float", "m", ref["lap_distance"]),
                  ("LapDistPct", "float", "%", ref["lap_distance"] / logger.lap_length),
-                 ("Throttle", "float", "%", ref["throttle"] / 100), ("Brake", "float", "%", ref["brake"] / ref["brake"].max()),
+                 ("Throttle", "float", "%", pedal), ("Brake", "float", "%", ref["brake"] / ref["brake"].max()),
                  ("SteeringWheelAngle", "float", "rad", np.radians(ref["steering"])),
                  ("LatAccel", "float", "m/s^2", ref["acc_lat"] * 9.81), ("LongAccel", "float", "m/s^2", ref["acc_long"] * 9.81),
                  ("RPM", "float", "revs/min", ref["rpm"]), ("Gear", "int", "", ref["gear"]),
@@ -281,7 +284,12 @@ def test_iracing_ibt(tmp_path, ref, logger):
     assert {k: s.mapping.get(k) for k in want} == want
     for cid, tol in (("speed", 1e-3), ("steering", 1e-3), ("acc_lat", 1e-5), ("throttle", 1e-3)):
         assert trace_error(s, ref, cid)[1] <= tol, cid       # m/s, rad, m/s² and 0–1 all converted
-    assert s.channels["throttle"].max() > 90 and s.units["throttle"] == "%"
+    assert s.channels["throttle"].max() == pytest.approx(100, abs=1e-3) and s.units["throttle"] == "%"
+    flat = (ref["throttle"] >= 99.9).to_numpy()
+    assert flat.any() and (s.channels["throttle"].to_numpy()[flat] >= 99.9).all(), "full throttle reads 100 %, not 1 %"
+    assert s.channels["brake"].max() == pytest.approx(100, abs=1e-3) and s.units["brake"] == "%"
+    assert s.raw.data["LapDistPct"].max() > 90, "every variable iRacing labels % is scaled, not only the pedals"
+    assert any("scaled to 0–100" in m for _, m in s.raw.notes)
     assert_same_laps(s, logger, 0.06)
 
 
@@ -632,3 +640,19 @@ def test_a_channel_is_only_a_lap_timer_if_it_behaves_like_one():
     assert lap_timer_crossings([Signal("TIME", t, np.where(t < 150, t, t - 150))]) is None, "one restart is not enough"
     given = signals_to_table([Signal("TIME", t, timer), Signal("Speed", t, timer)], "test", beacons=np.array([50.0]))
     assert list(given.beacons) == [50.0], "markers the file gives outright are not replaced"
+
+
+def test_a_pedal_logged_as_a_float32_fraction_is_still_read_as_a_fraction(tmp_path):
+    """Any logger that writes a 0–1 pedal through a 32-bit float can read 1.00000012
+    when the pedal is flat. That is still a fraction, so it becomes 0–100 %."""
+    t = np.arange(0, 60, 0.05)
+    flat = float(np.nextafter(np.float32(1), np.float32(2)))
+    throttle = np.clip(np.sin(t / 3) * 1.4, 0, None)
+    throttle = np.where(throttle >= 1, flat, throttle)
+    df = pd.DataFrame({"Time": t, "Speed": 150 + 20 * np.sin(t / 5), "Throttle": throttle, "Brake": np.clip(-np.sin(t / 3), 0, 1)})
+    path = tmp_path / "pedals.csv"
+    df.to_csv(path, index=False, float_format="%.9g")
+    s = load_session(path)
+    assert s.channels["throttle"].max() == pytest.approx(100, abs=1e-3) and s.units["throttle"] == "%"
+    assert (s.channels["throttle"] >= 99.9).mean() > 0.2
+    assert s.channels["brake"].max() == pytest.approx(100, abs=1e-3)

@@ -253,6 +253,17 @@ def _unit_key(unit) -> str:
     return (unit or "").strip().lower().replace(" ", "").replace("²", "^2")
 
 
+FRACTION_SLACK = 1e-3          # a 0–1 fraction stored as a 32-bit float can read 1.00000012 at full scale
+
+
+def _is_fraction(x) -> bool:
+    """True when a pedal-like channel runs 0 to 1 rather than 0 to 100 — allowing
+    for the rounding of 32-bit floats, and for a channel that never got above 1 %
+    being implausible for a whole session."""
+    lo, hi = np.nanmin(x), np.nanmax(x)
+    return bool(lo >= -0.01 and 0.0 < hi <= 1.0 + FRACTION_SLACK)
+
+
 def _to_canonical(raw: RawTable, mapped: dict, note_all) -> tuple[pd.DataFrame, dict, dict]:
     """Mapped channels as float columns in schema units. Every conversion and
     every assumption is recorded as a note. Also returns, per channel, where
@@ -299,14 +310,14 @@ def _to_canonical(raw: RawTable, mapped: dict, note_all) -> tuple[pd.DataFrame, 
             elif unit:
                 note("warning", f"{col}: unit '{unit_text}' not recognised — assumed {target}.")
         elif q == "percent":
-            if unit != "%" and np.nanmin(x) >= -0.01 and np.nanmax(x) <= 1.0:
+            if unit != "%" and _is_fraction(x):
                 note("info", f"{col} is a 0–1 fraction in the file — converted to %.")
                 x = x * 100
         elif q == "brake":
             target = "%"
             if unit in UNIT_FACTORS["pressure"]:
                 x, target = x * UNIT_FACTORS["pressure"][unit], "bar"
-            elif unit != "%" and np.nanmin(x) >= -0.01 and np.nanmax(x) <= 1.0:
+            elif unit != "%" and _is_fraction(x):
                 note("info", f"{col} is a 0–1 fraction in the file — converted to %.")
                 x = x * 100
             elif unit and unit != "%":

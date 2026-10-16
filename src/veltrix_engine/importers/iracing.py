@@ -6,9 +6,11 @@ table describing every variable, the session information as YAML text, then one
 fixed-size record per tick. Every variable is logged on every tick, so the file
 is already a table.
 
-iRacing labels throttle, brake and clutch "%" although the values run 0 to 1;
-those labels are dropped here so the engine reads the numbers for what they
-are. Array variables (one value per car, for example) are left out.
+iRacing labels throttle, brake, clutch and its other fractions "%" although
+the values run 0 to 1, and stores them as 32-bit floats, so a pedal held
+flat reads 1.00000012. They are scaled to 0-100 here, where the format is
+known, rather than left for the engine to recognise from the values.
+Array variables (one value per car, for example) are left out.
 """
 
 from __future__ import annotations
@@ -58,7 +60,7 @@ def parse_ibt(data: bytes) -> RawTable:
     buf_off = struct.unpack_from("<i", data, _VAR_BUF_OFFSET + 4)[0]
     start_date = _DISK_HEADER.unpack_from(data, 112)[0]
 
-    fields, units, arrays = [], {}, 0
+    fields, units, arrays, fractions = [], {}, 0, []
     for i in range(n_vars):
         kind, offset, count, _, name, _desc, unit = _VAR.unpack_from(data, var_off + i * _VAR.size)
         name, unit = _text(name), _text(unit)
@@ -66,7 +68,9 @@ def parse_ibt(data: bytes) -> RawTable:
             arrays += 1
             continue
         fields.append((name, _TYPES[kind], offset))
-        if unit and unit != "%":
+        if unit == "%" and kind in (4, 5):
+            fractions.append(name)
+        if unit:
             units[name] = unit
     n = (len(data) - buf_off) // buf_len
     if n < 2 or not fields:
@@ -75,6 +79,8 @@ def parse_ibt(data: bytes) -> RawTable:
                       "offsets": [f[2] for f in fields], "itemsize": buf_len})
     rec = np.frombuffer(data, dtype, n, buf_off)
     df = pd.DataFrame({name: rec[name].astype(float) for name, _, _ in fields})
+    for name in fractions:                # 0-1 in the file, "%" on the label: make the label true
+        df[name] = df[name] * 100.0
 
     yaml = data[info_off:info_off + info_len].decode("latin-1", errors="replace")
     info = {}
@@ -109,6 +115,10 @@ def parse_ibt(data: bytes) -> RawTable:
                 hints[cid_base] = col
 
     notes = [("info", f"{n_vars - arrays} variables at {tick} Hz" + (f"; {arrays} array or text variable(s) left out." if arrays else "."))]
+    if fractions:
+        shown = ", ".join(n for n in ("Throttle", "Brake", "Clutch") if n in fractions) or fractions[0]
+        notes.append(("info", f"{len(fractions)} variable(s) iRacing labels % but stores as 0–1 ({shown}, …) were "
+                              "scaled to 0–100."))
     if "IsOnTrack" in df and not df["IsOnTrack"].all():
         off = 1 - float(df["IsOnTrack"].mean())
         notes.append(("info", f"The car is off track (garage or replay) for {off:.0%} of the file."))
