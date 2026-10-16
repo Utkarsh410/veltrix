@@ -548,8 +548,8 @@ def test_axes_and_range_in_the_window(qt, tmp_path, session):
     lo, hi = temp_curve.getViewBox().viewRange()[1]
     assert 40 < lo < hi < 140, "the temperature has its own scale, not the speed's"
     assert np.nanmax(temp_curve.getData()[1]) == pytest.approx(np.nanmax(session.model.get("tyre_temp_fl_mid").values))
-    names = [label.text for _, label in plot.legend.items]
-    assert names == ["speed [km/h]", "tyre_temp_fl_mid [°C]", "rpm [rpm]"]
+    assert plot.key == ["speed [km/h]", "tyre_temp_fl_mid [°C]", "rpm [rpm]"], "named above the chart"
+    assert plot.legend is None, "no legend laid over the curves"
     w.set_cursor(100.0)
     assert all(c.value() == 100.0 for c in w._cursors), "the extra axes do not get in the cursor's way"
 

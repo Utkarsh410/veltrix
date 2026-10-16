@@ -53,3 +53,20 @@ class EvenRows(QtCore.QObject):
         if obj is self.widget and event.type() == QtCore.QEvent.Resize:
             QtCore.QTimer.singleShot(0, self.apply)      # after the widget has its new size
         return False
+
+
+GLYPH = ("━━", "╍╍", "┅┅")   # what solid, dashed and dotted lines look like in a key
+KEY_COLOUR = "#B8B5C4"
+
+
+def set_key(plot, entries: list, prefix: str = ""):
+    """Name what a chart draws in a strip above its plotting area, instead of
+    a legend laid over the curves. entries: [(text, colour, line style index), ...];
+    a colour of None draws the line sample in the key's own grey."""
+    parts = [f'<span style="color:{KEY_COLOUR}">{prefix}</span>'] if prefix else []
+    for text, colour, style in entries:
+        parts.append(f'<span style="color:{colour or KEY_COLOUR}">{GLYPH[style % len(GLYPH)]}</span>'
+                     f'&nbsp;<span style="color:{KEY_COLOUR}">{text}</span>')
+    plot.key = [text for text, _, _ in entries]
+    plot.titleLabel.opts["justify"] = "left"
+    plot.setTitle("&nbsp;&nbsp;&nbsp;".join(parts) or "&nbsp;", size="9pt")

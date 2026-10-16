@@ -12,7 +12,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtWidgets
 
-from .chart_layout import EvenRows
+from .chart_layout import EvenRows, set_key
 from .compare import ALIGN, LapComparison
 
 NO_LAPS = "No laps are loaded. Click laps in the Laps tab on the left to draw them over each other."
@@ -132,19 +132,22 @@ class CompareView(QtWidgets.QWidget):
             plot.showGrid(x=True, y=True, alpha=0.15)
             plot.setMouseEnabled(x=True, y=False)
             plot.setMenuEnabled(False)
-            plot.addLegend(offset=(8, 4), labelTextSize="9pt")
             if k:
                 plot.setXLink(self._plots[0])
             if channels is None:
                 plot.setLabel("left", "Δt (s), + is slower")
                 plot.addLine(y=0, pen=pg.mkPen("#6E6B7A"))
+                key = []
                 for lap in cmp_.laps[1:]:
                     d = cmp_.delta(lap)
                     if d is not None:
-                        plot.plot(d["x"], d["dt"], pen=pg.mkPen(colour[lap], width=1),
-                                  name=f"{self.name(lap)} − {self.name(cmp_.reference)}: {d['final_s']:+.3f} s")
+                        plot.plot(d["x"], d["dt"], pen=pg.mkPen(colour[lap], width=1))
+                        key.append((f"{self.name(lap)} {d['final_s']:+.3f} s", colour[lap], 0))
+                set_key(plot, key, prefix=f"Δt against {self.name(cmp_.reference)}:" if key
+                        else "Δt: load a second lap to see time gained and lost")
                 plot.setLabel("bottom", cmp_.x_label)
             else:
+                key = []
                 for n, channel in enumerate(channels):
                     for lap in cmp_.laps:
                         tr = cmp_.trace(channel, lap, width)
@@ -153,8 +156,11 @@ class CompareView(QtWidgets.QWidget):
                         x, v = tr["x"], tr["v"]
                         if tr["discrete"] and len(x) > 1:
                             x, v = np.repeat(x, 2)[1:], np.repeat(v, 2)[:-1]
-                        plot.plot(x, v, pen=pg.mkPen(colour[lap], width=1, style=STYLES[n % len(STYLES)]),
-                                  name=f"{channel} [{tr['unit']}] · {self.name(lap)}", connect="finite")
+                        plot.plot(x, v, pen=pg.mkPen(colour[lap], width=1, style=STYLES[n % len(STYLES)]), connect="finite")
+                    unit = self.cmp.model.get(channel).unit if self.cmp.model.has(channel) else ""
+                    key.append((f"{channel} [{unit}]" if unit else channel, None, n))
+                # the lap colours are in the panel's Tests loaded; the key says which line style is which channel
+                set_key(plot, key)
             cursor = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen("#F4F2F8", width=1))
             cursor.sigPositionChanged.connect(self._dragged)
             plot.addItem(cursor)

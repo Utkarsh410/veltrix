@@ -25,7 +25,7 @@ from veltrix_engine.report import write_report
 
 from .compare_view import CompareView
 from .channel_picker import ChannelPicker
-from .chart_layout import AXIS_WIDTH, EvenRows
+from .chart_layout import AXIS_WIDTH, EvenRows, set_key
 from .events import AnnotationStore, annotate, detect_events
 from .extras import load_rules
 from .paths import data_dir
@@ -696,7 +696,6 @@ class MainWindow(QtWidgets.QMainWindow):
             plot.showGrid(x=True, y=True, alpha=0.15)
             plot.setMouseEnabled(x=True, y=False)
             plot.setMenuEnabled(False)
-            plot.addLegend(offset=(8, 4), labelTextSize="9pt")
             if k:
                 plot.setXLink(self._plots[0])
             if k == len(self.ws.charts) - 1:
@@ -746,7 +745,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 follow()
                 views[unit] = view
                 self._extra_views.append(view)
-            curves = []
+            curves, key = [], []
             for n, name in enumerate(chart.channels):
                 if self.ws.model is None or not self.ws.model.has(name):
                     curves.append(None)
@@ -754,12 +753,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 c = self.ws.model.get(name)
                 pen, label = pg.mkPen(COLOURS[n % len(COLOURS)], width=1), f"{c.id} [{c.unit}]"
                 if views.get(c.unit) is None:
-                    curve = plot.plot([], [], pen=pen, name=label, connect="finite")
+                    curve = plot.plot([], [], pen=pen, connect="finite")
                 else:
                     curve = pg.PlotDataItem([], [], pen=pen, connect="finite")
                     views[c.unit].addItem(curve)
-                    plot.legend.addItem(curve, label)
+                key.append((label, COLOURS[n % len(COLOURS)], 0))
                 curves.append(curve)
+            set_key(plot, key)
             cursor = pg.InfiniteLine(angle=90, movable=True, pen=pg.mkPen("#F4F2F8", width=1))
             cursor.sigPositionChanged.connect(self._cursor_dragged)
             plot.addItem(cursor)

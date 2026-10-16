@@ -73,7 +73,11 @@ match, your choice — and where its unit came from.
 ## 4. Charts and the cursor
 
 Charts are stacked on one time axis, each with the same plotting height and the
-same left edge, however many there are and whatever the window's size. Drag to pan, scroll to zoom; **Whole
+same left edge, however many there are and whatever the window's size. What each
+chart draws is named in a strip above it, in the curve's colour, rather than in a
+legend over the curves. With laps loaded the strip shows each channel's line
+style (the lap colours are in **Tests loaded**), and the delta chart's strip
+gives every lap's final time difference to the reference. Drag to pan, scroll to zoom; **Whole
 session** shows everything. Click or drag the white line to move the cursor:
 it moves on every chart, on the map and in the video.
 

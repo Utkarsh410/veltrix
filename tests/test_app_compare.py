@@ -117,6 +117,9 @@ def test_laps_are_loaded_from_the_panel_on_the_left(tmp_path, monza):
     assert "aligned by distance" in view.mode.text() and "Reference: lap 4" in view.mode.text()
     assert len(view._plots) == len([c for c in w.ws.charts if c.channels]) + 1, "the session's charts, and delta time"
     assert len(view._plots[-1].listDataItems()) == 2
+    assert all(p.legend is None for p in view._plots + w._plots), "no legend laid over the curves"
+    assert view._plots[0].key == ["speed [km/h]"] and view._plots[-1].key[0].startswith("lap 2 +")
+    assert "Δt against lap 4" in view._plots[-1].titleLabel.text
 
     # the charts are evenly laid out: same plotting height, same left edge, whichever carries the x-axis numbers
     app.processEvents()
