@@ -1,12 +1,15 @@
 """
 Session: one imported telemetry file, normalised and ready for analysis.
 
-Three layers are kept apart so imports are replaceable and calculations are
-reproducible:
+The session is built as a canonical model (model.py): raw, normalised,
+corrected and calculated channels, each on its own timestamps with its
+provenance. `Session.model` is that model. The rest of the Session is the
+model's *analysis view* — the channels laid on one uniform clock, which is what
+the lap, corner and balance calculations work on:
 
   raw       the file as read (RawTable) — never modified
-  channels  normalised channels: schema ids, schema units and signs, uniform
-            time base, plus `lap` and `lap_distance`
+  channels  the analysis view of the normalised channels: schema ids, schema
+            units and signs, one uniform time base, plus `lap` and `lap_distance`
   derived   channels computed by the engine from `channels`
 
 `load_session(path)` runs the whole pipeline:
@@ -23,8 +26,10 @@ import pandas as pd
 
 from . import laps as lap_engine
 from .derived import compute_derived
-from .importers import RawTable, read_csv
+from .importers import RawTable, read_file
 from .mapping import auto_map, validate_mapping
+from .model import SessionModel
+from .model_build import build_model
 from .schema import CANONICAL_UNIT, CHANNELS, UNIT_FACTORS
 from .vehicle import VehicleParams
 
@@ -48,6 +53,7 @@ class Session:
     crossing_method: str = ""
     coarse: dict = field(default_factory=dict)    # {channel id: step} recorded too coarsely
     rebuilt: dict = field(default_factory=dict)   # {signal: how it was rebuilt}
+    model: SessionModel | None = None             # the canonical model this session is a view of
 
     def frame(self) -> pd.DataFrame:
         """Normalised and derived channels side by side."""
@@ -71,9 +77,14 @@ class Session:
                 "coarse": self.coarse, "rebuilt": self.rebuilt}
 
 
-def load_session(path: str | Path, **kwargs) -> Session:
-    """Read a telemetry file and build a Session. See build_session for options."""
-    return build_session(read_csv(path), **kwargs)
+def load_session(path: str | Path, dbc=None, channels=None, progress=None, cancel=None, **kwargs) -> Session:
+    """Read a telemetry file of any supported format and build a Session.
+
+    dbc: the DBC file (or files) a CAN log is decoded with; left out, the .dbc
+         files beside the log are used.
+    channels, progress, cancel: for lazily read formats (MDF) — see read_file.
+    See build_session for the other options."""
+    return build_session(read_file(path, dbc=dbc, channels=channels, progress=progress, cancel=cancel), **kwargs)
 
 
 def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: dict | None = None,
@@ -97,13 +108,23 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     vehicle = vehicle or VehicleParams()
     notes: list = []
     note = lambda level, msg: notes.append((level, msg))
+    if raw.format != "CSV":
+        note("info", f"Read as {raw.format}.")
+    notes += [tuple(n) for n in raw.notes]
 
     # ── map ────────────────────────────────────────────────────────────────
     mapped = auto_map(raw.data.columns)
+    decided_by = {cid: "name match" for cid in mapped}
+    for cid, col in raw.hints.items():           # channels the file format itself identifies
+        if col in raw.data.columns and cid in CHANNELS:
+            mapped = {c: k for c, k in mapped.items() if k != col}
+            mapped[cid] = col
+            decided_by[cid] = "the file format"
     if mapping:
         validate_mapping(mapping, raw.data.columns)
         mapped = {c: col for c, col in mapped.items() if col not in mapping.values()}
         mapped.update(mapping)
+        decided_by.update({cid: "chosen at import" for cid in mapping})
     missing = [c for c in REQUIRED if c not in mapped and not (c == "time" and rate_hz)]
     if missing:
         raise ValueError(
@@ -116,12 +137,15 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     if unknown:
         raise ValueError(f"units= names column(s) that are not in the file: {unknown}")
     raw.units = {**raw.units, **stated}
-    cdf, units = _to_canonical(raw, mapped, note)
-    _accel_unit_check(cdf, raw, mapped, stated, note)
+    cdf, units, unit_source = _to_canonical(raw, mapped, note)
+    unit_source.update({cid: "stated" for cid, col in mapped.items() if col in stated})
+    _glitch_check(cdf, raw, mapped, note)
+    _speed_spikes(cdf, raw, mapped, note)
+    unit_source.update({cid: "plausibility" for cid in _accel_unit_check(cdf, raw, mapped, stated, note)})
     coarse = _resolution_check(cdf, mapped, units, note)
     if "time" not in cdf:
         cdf["time"] = np.arange(len(cdf)) / rate_hz
-        units["time"] = "s"
+        units["time"], unit_source["time"] = "s", "assumed"
         note("info", f"No time channel — assumed a uniform {rate_hz:g} Hz.")
     for cid in flip:
         if cid in cdf:
@@ -129,6 +153,7 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
             note("info", f"{cid}: sign flipped to match the schema convention.")
 
     # ── time base ──────────────────────────────────────────────────────────
+    as_logged = cdf            # schema units, the file's own rows: what the raw layer is timed against
     timer_crossings = None
     cdf = cdf[np.isfinite(cdf["time"])].reset_index(drop=True)
     t = cdf["time"].to_numpy()
@@ -169,7 +194,9 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     # ── resample ───────────────────────────────────────────────────────────
     dt_src = float(np.median(np.diff(t)))
     if rate_hz is None:
-        rate_hz = _standard_rate(1.0 / dt_src)
+        # a log on a steady clock is analysed on that clock, sample for sample; only a log with no
+        # single rate (jitter, distance-based sampling) is brought to a standard one
+        rate_hz = _steady_rate(t) or _standard_rate(1.0 / dt_src)
     note("info", f"{len(cdf):,} samples logged at about {1 / dt_src:,.1f} Hz; "
                  f"normalised to {rate_hz:g} Hz.")
     channels = _resample(cdf, t, rate_hz, lap_table, info["distance"],
@@ -184,15 +211,36 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     derived, derived_notes, rebuilt = compute_derived(channels, rate_hz, vehicle, coarse)
     notes += [("warning" if "cannot be rebuilt" in m else "info", m) for m in derived_notes]
 
+    model = build_model(raw, mapped, units, unit_source, as_logged, cdf, channels, derived, lap_table,
+                        notes, rate_hz, coarse, rebuilt, tuple(flip))
+    model.mapping = [{"column": str(col), "channel": cid, "basis": decided_by.get(cid, "name match"), "confirmed": False,
+                      "unit": raw.units.get(col) or "unknown", "unit_source": unit_source.get(cid, "none"), "problems": []}
+                     for cid, col in mapped.items()]
     return Session(raw=raw, channels=channels, derived=derived, laps=lap_table, mapping=mapped,
                    units=units, rate_hz=rate_hz, lap_length=lap_length, vehicle=vehicle,
                    notes=notes, lap_source=source, crossing_method=info["crossing"],
-                   coarse=coarse, rebuilt=rebuilt)
+                   coarse=coarse, rebuilt=rebuilt, model=model)
 
 
 # ── steps ─────────────────────────────────────────────────────────────────────
 
 STANDARD_RATES = (1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000)
+
+
+STEADY_TOLERANCE = 0.01       # sample intervals within this share of their median: a steady clock
+STEADY_SHARE = 0.995          # ... for at least this share of the steps (a few gaps do not unsteady it)
+
+
+def _steady_rate(t: np.ndarray) -> float | None:
+    """The file's own rate if it logs on a steady clock, else None."""
+    dt = np.diff(t)
+    dt = dt[dt > 0]
+    if len(dt) < 10:
+        return None
+    step = float(np.median(dt))
+    if np.mean(np.abs(dt - step) <= STEADY_TOLERANCE * step) < STEADY_SHARE:
+        return None
+    return float(f"{1.0 / step:.6g}")
 
 
 def _standard_rate(native_hz: float) -> float:
@@ -205,15 +253,24 @@ def _unit_key(unit) -> str:
     return (unit or "").strip().lower().replace(" ", "").replace("²", "^2")
 
 
-def _to_canonical(raw: RawTable, mapped: dict, note) -> tuple[pd.DataFrame, dict]:
+def _to_canonical(raw: RawTable, mapped: dict, note_all) -> tuple[pd.DataFrame, dict, dict]:
     """Mapped channels as float columns in schema units. Every conversion and
-    every assumption is recorded as a note."""
+    every assumption is recorded as a note. Also returns, per channel, where
+    its unit came from: "file" (the file's units row), "plausibility" (worked
+    out from the values), "assumed" (nothing to go on but the schema's unit)
+    or "none" (the channel has no unit)."""
     df = raw.data
-    cdf, units = pd.DataFrame(index=df.index), {}
+    cdf, units, unit_source = pd.DataFrame(index=df.index), {}, {}
     for cid, col in mapped.items():
         cdef = CHANNELS[cid]
+        said = []
+
+        def note(level, msg, said=said):
+            said.append(msg)
+            note_all(level, msg)
         if cid == "lap":
             cdf[cid] = df[col].to_numpy()
+            unit_source[cid] = "none"
             continue
         x = pd.to_numeric(df[col], errors="coerce").to_numpy(float)
         unit_text = raw.units.get(col, "")
@@ -262,13 +319,20 @@ def _to_canonical(raw: RawTable, mapped: dict, note) -> tuple[pd.DataFrame, dict
             elif unit in ("k", "kelvin"):
                 x = x - 273.15
         cdf[cid], units[cid] = x, target
+        inferred = any("fraction" in m for m in said) or (not unit and any("converted" in m for m in said))
+        unit_source[cid] = ("plausibility" if inferred else
+                            "file" if unit and not any("not recognised" in m for m in said) else
+                            "none" if not q and not unit else "assumed")
 
+    note = note_all
     if "speed" in cdf:
         col = mapped["speed"]
         unit = _unit_key(raw.units.get(col))
         table = UNIT_FACTORS["speed"]
+        unit_source["speed"] = "file"
         if unit not in table:
             unit = _speed_unit_from_distance(cdf) if {"time", "distance"} <= set(cdf) else None
+            unit_source["speed"] = "plausibility" if unit else "assumed"
             note("info" if unit else "warning", f"{col} has no unit in the file — " + (
                 f"its distance over time matches the distance channel as {unit}." if unit
                 else "assumed km/h."))
@@ -276,7 +340,7 @@ def _to_canonical(raw: RawTable, mapped: dict, note) -> tuple[pd.DataFrame, dict
             cdf["speed"] = cdf["speed"] * table[unit]
             note("info", f"{col} converted from {unit} to km/h.")
         units["speed"] = "km/h"
-    return cdf, units
+    return cdf, units, unit_source
 
 
 def _speed_unit_from_distance(cdf):
@@ -345,9 +409,39 @@ def _resolution_check(cdf, mapped, units, note) -> dict:
     return found
 
 
+def _position_sign_check(channels, note) -> None:
+    """The way the path turns must agree with steering and lateral g. A
+    disagreement means the position plane is mirrored or the other channel's
+    sign is opposite to the schema; the engine reports it and changes nothing."""
+    if not {"pos_x", "pos_y", "speed", "time"} <= set(channels.columns):
+        return
+    dt = float(np.median(np.diff(channels["time"].to_numpy())))
+    n = max(int(round(0.5 / dt)), 1)                       # position is often logged in coarse time steps
+    x = channels["pos_x"].rolling(n, center=True, min_periods=1).mean().to_numpy()
+    y = channels["pos_y"].rolling(n, center=True, min_periods=1).mean().to_numpy()
+    heading = np.unwrap(np.arctan2(np.gradient(y), np.gradient(x)))
+    rate = pd.Series(np.gradient(heading) / dt).rolling(n, center=True, min_periods=1).mean().to_numpy()
+    turning = (np.abs(rate) > 0.05) & (np.abs(rate) < 2.0) & (channels["speed"].to_numpy(float) > 40)
+    if turning.sum() < 200:
+        return
+    for cid in ("steering", "acc_lat"):
+        if cid not in channels:
+            continue
+        v = channels[cid].to_numpy(float)[turning]
+        if np.nanstd(v) == 0:
+            continue
+        r = float(np.corrcoef(v, rate[turning])[0, 1])
+        if r < -0.3:
+            note("warning", f"{cid} and the position channels disagree about left and right (r = {r:.2f}): either "
+                            f"{cid} has the opposite sign to the schema, or the position plane is mirrored. The map "
+                            "and corner directions follow position as logged. Import with "
+                            f"flip=(\"{cid}\",) or flip=(\"pos_y\",) once you know which.")
+
+
 def _sign_check(channels, note) -> None:
     """Steering, lateral g and yaw rate must agree in sign while cornering.
     The engine does not choose which one is wrong — it reports the conflict."""
+    _position_sign_check(channels, note)
     if "acc_lat" not in channels:
         return
     ay = channels["acc_lat"].to_numpy(float)
@@ -367,7 +461,57 @@ def _sign_check(channels, note) -> None:
                             "import with flip=(...) for the channel that is wrong.")
 
 
-def _accel_unit_check(cdf, raw: RawTable, mapped, stated, note) -> None:
+GLITCH_CHANNELS = ("acc_lat", "acc_long", "acc_vert", "yaw_rate")
+SPEED_SPIKE_KMH = 40.0        # a speed sample this far from its neighbours on both sides is not the car
+GLITCH_FACTOR = 5.0           # this many times beyond the channel's own 99.9th percentile is not a measurement
+
+
+def _speed_spikes(cdf, raw: RawTable, mapped, note) -> None:
+    """Blank isolated speed samples that jump away from their neighbours and
+    back — a dropped sample reading zero, a wheel-speed spike. Judged against
+    the median of the five samples around each one, so a real change of speed,
+    however sharp, is never touched, and neither is a channel logged in coarse
+    steps. The blanked samples are bridged when the channel is resampled."""
+    if "speed" not in cdf or len(cdf) < 20:
+        return
+    v = cdf["speed"].to_numpy(float)
+    around = pd.Series(v).rolling(5, center=True, min_periods=3).median().to_numpy()
+    bad = np.isfinite(v) & np.isfinite(around) & (np.abs(v - around) > SPEED_SPIKE_KMH)
+    if bad.any():
+        worst = float(np.max(np.abs(v[bad] - around[bad])))
+        cdf.loc[bad, "speed"] = np.nan
+        note("warning", f"{mapped['speed']}: {int(bad.sum())} sample(s) jump up to {worst:.0f} km/h away from the samples "
+                        "either side and straight back. Treated as glitches and left out.")
+
+
+def _glitch_check(cdf, raw: RawTable, mapped, note) -> None:
+    """Blank the few samples that sit far outside everything else a channel
+    reads — a crash, a reset to the pits or a logger hiccup can write values
+    hundreds of times larger than any real acceleration. Left in, a dozen such
+    samples are enough to wreck every fit and correlation made on the channel.
+    The blanked samples are bridged when the channel is resampled."""
+    for cid in GLITCH_CHANNELS:
+        if cid not in cdf:
+            continue
+        x = cdf[cid].to_numpy(float)
+        size = np.abs(x[np.isfinite(x)])
+        if len(size) < 1000:
+            continue
+        usual = float(np.percentile(size, 99.9))
+        if usual <= 0:
+            continue
+        bad = np.abs(x) > GLITCH_FACTOR * usual
+        if bad.any():
+            # quote the numbers as the file has them: units may not be settled yet
+            written = pd.to_numeric(raw.data[mapped[cid]], errors="coerce").to_numpy(float)
+            worst = float(np.nanmax(np.abs(written[bad])))
+            typical = float(np.nanpercentile(np.abs(written), 99.9))
+            cdf.loc[bad, cid] = np.nan
+            note("warning", f"{mapped[cid]}: {int(bad.sum())} samples read up to {worst:,.0f} in the file, far outside the "
+                            f"rest of the channel (99.9% of it is within {typical:.3g}). Treated as glitches and left out.")
+
+
+def _accel_unit_check(cdf, raw: RawTable, mapped, stated, note) -> list:
     """Check the longitudinal accelerometer against d(speed)/dt.
 
     Some exports label accelerations m/s² when the numbers are in g (or the
@@ -376,15 +520,15 @@ def _accel_unit_check(cdf, raw: RawTable, mapped, stated, note) -> None:
     acceleration channel that carried the same label, and a warning says so.
     Columns whose unit the caller stated are left alone."""
     if not {"time", "speed", "acc_long"} <= set(cdf) or mapped["acc_long"] in stated:
-        return
+        return []
     t = cdf["time"].to_numpy(float)
     ok = np.isfinite(t) & np.isfinite(cdf["speed"].to_numpy(float)) & np.isfinite(cdf["acc_long"].to_numpy(float))
     if ok.sum() < 500 or np.any(np.diff(t[ok]) < 0):
-        return
+        return []
     # 10 Hz grid, 1 s moving average: enough to compare trends, immune to noise
     grid = np.arange(t[ok][0], t[ok][-1], 0.1)
     if len(grid) < 300:
-        return
+        return []
     box = np.ones(10) / 10
     v = np.convolve(np.interp(grid, t[ok], cdf["speed"].to_numpy(float)[ok]) / 3.6, box, mode="same")
     a = np.convolve(np.interp(grid, t[ok], cdf["acc_long"].to_numpy(float)[ok]), box, mode="same")
@@ -392,28 +536,30 @@ def _accel_unit_check(cdf, raw: RawTable, mapped, stated, note) -> None:
     use = (v > 15) & (np.abs(dv) > 0.05)
     use[:10] = use[-10:] = False
     if use.sum() < 200 or np.std(a[use]) == 0:
-        return
+        return []
     r = float(np.corrcoef(dv[use], a[use])[0, 1])
     slope = float(np.polyfit(dv[use], a[use], 1)[0])     # 1 when acc_long really is in g
     if r < 0.8:
-        return
+        return []
     label = raw.units.get(mapped["acc_long"], "")
     if 0.07 < slope < 0.145:
         factor, was, now = 9.81, "m/s²", "g"
     elif 7.0 < slope < 14.0:
         factor, was, now = 1 / 9.81, "g", "m/s²"
     else:
-        return
-    fixed = []
+        return []
+    fixed, fixed_ids = [], []
     for cid in ("acc_long", "acc_lat", "acc_vert"):
         col = mapped.get(cid)
         if cid in cdf and col not in stated and raw.units.get(col, "") == label:
             cdf[cid] = cdf[cid] * factor
             fixed.append(col)
+            fixed_ids.append(cid)
     note("warning", f"{', '.join(fixed)}: " + (f"labelled {label} in the file" if label else "no unit in the file")
          + f", but the values behave like {now} — {mapped['acc_long']} matches d(speed)/dt only when read as "
            f"{now} (fit slope {slope:.3f} as {was}, r = {r:.2f}). Read as {now}. "
            f"Pass units={{column: unit}} to override.")
+    return fixed_ids
 
 
 def _stints(lap_table, channels, rate_hz, note) -> pd.DataFrame:

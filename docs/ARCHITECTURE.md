@@ -1,5 +1,8 @@
 # Architecture
 
+The canonical data model every layer below reads is described in
+[data-model.md](data-model.md).
+
 ## Layers
 
 ```
@@ -23,13 +26,39 @@ arrays) and returns tables or numbers.
 
 | Step | Module | Output |
 |---|---|---|
-| Read | `importers/csv_importer.py` | `RawTable`: source columns, units row, header metadata, beacons, SHA-256 |
+| Read | `importers/` (`read_file`) | `RawTable`: source columns, units, header metadata, beacons, importer notes, SHA-256 |
 | Map | `mapping.py` | `{channel id: source column}` |
 | Convert units | `session.py` | Channels in schema units; every conversion or guess recorded |
 | Check | `session.py` | Notes on gaps, backwards or repeated timestamps, bad cells |
 | Find laps | `laps.py` | Lap table with line-to-line times and a status per lap |
 | Resample | `session.py` | Uniform time base; `lap` and `lap_distance` rebuilt so they are exact at the line |
 | Derive | `derived.py` | Derived channels whose inputs exist; the rest skipped and reported |
+
+`read_file` recognises the format from the file's content (then its extension)
+and hands it to one module per format. Every module returns the same
+`RawTable`, so nothing after the read step knows what the file was:
+
+| Module | Formats | Notes |
+|---|---|---|
+| `csv_importer` | CSV exports of any logger | |
+| `motec` | MoTeC `.ld`, beacons from `.ldx` | multi-rate |
+| `iracing` | `.ibt` | single rate; the SDK's "%" labels on 0–1 values are dropped |
+| `vbox` | `.vbo` | decodes the VBOX clock and minute-based coordinates; beacons from the stored start/finish line |
+| `aim` | `.xrk` `.xrz` `.drk` via `libxrk` | multi-rate; beacons from the logger's lap table |
+| `mdf` | MDF 3 / 4 via `asammdf` | multi-rate; raw CAN bus logging decoded with a DBC |
+| `mat` | MATLAB v5 / v7.3 | layout is recognised, not fixed |
+| `can` + `dbc` | `.asc`, candump, `.trc`, CSV frame logs, `.blf` | frames → signals with a DBC; multi-rate |
+
+Multi-rate formats are read as `Signal`s (name, own clock, values, unit) and
+`importers/table.py` lays them on one uniform time base at the fastest
+channel's rate. Three things an importer may pass on besides the table:
+`beacons` (lap-marker times), `notes` (what it decoded or left out) and `hints`
+(`{channel id: column}` for channels the format itself identifies, such as
+iRacing's tyre temperatures, which no name matching would find).
+
+An importer decodes only what is the format's own encoding (a clock written as
+HHMMSS, coordinates in minutes). Units and signs are still converted in one
+place, `session.py`.
 
 Laps are found on the samples as logged, before resampling, so crossing times
 are as exact as the source allows.
@@ -38,6 +67,20 @@ Lap boundaries come from the best source the file offers, in this order: lap
 channel (with beacons or lap-timer restarts as exact crossing times when their
 count matches), beacon markers, lap-timer restarts, lap-distance resets, a
 position gate, otherwise the whole file is one lap.
+
+## Engineering report
+
+`analysis/engineering.py` is the top of the analysis stack. It adds no signal
+processing: it takes what `corners`, `handling`, `tyres`, `balance` and `advice`
+measure and arranges it as nine fixed sections of findings, each a dict of
+`conclusion`, `evidence`, `calculation`, `confidence {level, basis}`,
+`recommendation`, and `gain_s` or `at_stake_s`. The result is plain JSON, so the
+HTML report, the CLI, the store (`engineering.json` per session) and the
+workspace all show the same thing, and a native app can render it unchanged.
+
+A finding's confidence comes from one function (`_Ctx.conf`) and is the lowest
+of laps, effect against scatter, data quality and named caps. Thresholds are
+module constants and are quoted in each finding's calculation text.
 
 ## Rules the engine holds to
 
@@ -96,8 +139,8 @@ These three are recommendations to confirm before the vertical slice starts.
 
 ## Open questions
 
-- Which logger exports come first after CSV. That decides whether a real golden
-  dataset is CSV or needs a binary importer.
+- A real file of each format for the golden datasets. The binary importers are
+  tested against files the test suite writes itself; see Known limits in the README.
 - Whether `brake` should be split into `brake_pos` (%) and `brake_pressure`
   (bar). Today it is one channel and the session records which unit it holds.
 - A standard rate is chosen per file (the lowest of 1, 2, 5, 10, 20, 25, 50, 100,

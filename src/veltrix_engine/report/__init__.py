@@ -1,6 +1,6 @@
 """
 Session report: one self-contained HTML page showing what the engine made of a
-telemetry file — lap times, a lap comparison with a shared cursor, grip,
+telemetry file — lap times, a track map and lap comparison sharing one cursor, grip,
 corner-by-corner analysis, understeer and oversteer incidents, stints, sectors and
 every note from the import.
 
@@ -23,9 +23,10 @@ import numpy as np
 
 from .. import corners as corner_engine
 from .. import laps as lap_engine
-from ..analysis import advice, balance, gg, handling, tyres
+from ..analysis import advice, balance, engineering, gg, handling, tyres
 from ..derived import best_lat
 from ..schema import CORNERS, tyre_temp_channel
+from ..track import track_map
 
 GRID_STEP_M = 5.0          # distance step of the lap traces in the page
 GG_POINTS = 3200           # points drawn in the G-G diagram
@@ -68,6 +69,18 @@ def report_data(session, title: str | None = None) -> dict:
                 entry["brk"] = [int(round(v)) for v in tr["brake"]]
             traces[str(lap)] = entry
 
+    # Track map, on the same distance grid as the lap traces
+    track_block = None
+    if traces:
+        try:
+            tm = track_map(s, step=GRID_STEP_M)
+            track_block = {"x": [_r(v, 1) for v in tm["x"]], "y": [_r(v, 1) for v in tm["y"]],
+                           "source": tm.attrs["source"], "closed": bool(tm.attrs["closed"]),
+                           "gap_m": _r(tm.attrs["gap_m"], 0), "direction": tm.attrs["direction"],
+                           "laps": len(tm.attrs["laps"])}
+        except ValueError:
+            track_block = None
+
     # Corners — metrics for every lap the page can compare
     corner_block = None
     if traces:
@@ -83,7 +96,8 @@ def report_data(session, title: str | None = None) -> dict:
                                      for c in found["corner"]]
             corner_block = {
                 "source": found.attrs["source"], "fields": list(fields),
-                "list": [{"corner": c.corner, "dir": c.direction, "kind": c.kind, "start": _r(c.start_m, 0),
+                "track": found.attrs.get("track"), "track_note": found.attrs.get("track_note", ""),
+                "list": [{"corner": c.corner, "name": c.name, "dir": c.direction, "kind": c.kind, "start": _r(c.start_m, 0),
                           "apex": _r(c.apex_m, 0), "end": _r(c.end_m, 0), "z0": _r(c.zone_start_m, 0),
                           "z1": _r(c.zone_end_m, 0)} for c in found.itertuples()],
                 "laps": per_lap,
@@ -124,6 +138,13 @@ def report_data(session, title: str | None = None) -> dict:
             s, {"corners": found, "metrics": metrics, "summary": summary}, handling_result)
         advice_block = {area: [{**i, "gain_s": _r(i["gain_s"], 2)} for i in suggestions[area]]
                         for area in ("driver", "setup")}
+
+    # The engineering report: nine sections, every conclusion with its evidence
+    engineering_block = engineering.analyse(
+        s, {"corners": found, "metrics": metrics, "summary": summary} if corner_block else None, handling_result)
+
+    # Where the data came from, what was computed and detected, and what limits the report
+    data_block = _data_block(s, engineering_block)
 
     # Grip — only when there is a usable lateral g (logged finely, or rebuilt)
     grip = None
@@ -190,13 +211,46 @@ def report_data(session, title: str | None = None) -> dict:
                  "footer": footer},
         "laps": [{"lap": l.lap, "stint": int(l.stint), "time": _r(l.lap_time_s), "status": l.status,
                   "dist": _r(l.dist_m, 0)} for l in laps.itertuples()],
-        "sectors": sectors, "traces": traces, "corners": corner_block, "handling": handling_block, "advice": advice_block,
+        "sectors": sectors, "traces": traces, "track": track_block, "corners": corner_block, "handling": handling_block, "advice": advice_block,
+        "engineering": engineering_block, "data": data_block,
         "gg": grip, "balance": bal, "stints": stints,
         "rebuilt": {k: {a: (_r(b) if isinstance(b, float) else b) for a, b in d.items()}
                     for k, d in s.rebuilt.items()},
         "notes": [{"level": level, "text": text} for level, text in s.notes],
     }
     return json.loads(json.dumps(data, default=_plain))      # numpy scalars -> plain values
+
+
+def _data_block(s, engineering_block: dict) -> dict | None:
+    """Mapping decisions, maths channels, detected events and limitations, from the session's model."""
+    model = getattr(s, "model", None)
+    if model is None:
+        return None
+    mapping = [{"channel": c.id, "column": c.source_name, "unit": c.unit, "unit_source": c.provenance.unit_source,
+                "rate": _r(c.sample_rate, 2), "flags": list(c.quality)} for c in model.channels("normalised")]
+    maths_rows = [{"name": c.id, "formula": c.formula, "unit": c.unit, "version": c.version,
+                   "invalid": int((~c.validity).sum()), "samples": int(len(c.values)),
+                   "estimate": any("estimate" in q for q in c.quality)}
+                  for c in model.channels("calculated") if c.user.get("maths")]
+    by_kind = {}
+    for e in model.events:
+        by_kind[e.kind] = by_kind.get(e.kind, 0) + 1
+    worst = sorted(model.events, key=lambda e: {"severe": 0, "moderate": 1, "mild": 2}.get(e.severity, 3))[:40]
+    events = [{"kind": e.kind, "lap": e.lap, "at": _r(e.position_m, 0), "t": _r(e.t_start, 2), "dur": _r(e.t_end - e.t_start, 2),
+               "severity": e.severity, "confidence": e.confidence} for e in sorted(worst, key=lambda e: e.t_start)]
+    limits = [m for level, m in s.notes if level == "warning"]
+    limits += [f"{sec['title']}: not assessed — {sec['not_assessed']}." for sec in engineering_block["sections"] if sec["not_assessed"]]
+    assumed = [c.id for c in model.channels("normalised") if c.provenance.unit_source == "assumed"]
+    if assumed:
+        limits.append("The file gives no unit for " + ", ".join(assumed) + "; the schema unit was assumed.")
+    if model.events:
+        limits.append("Detected events are candidates found by threshold rules, not confirmed incidents; the thresholds "
+                      "are illustrative until tuned to the car.")
+    return {"mapping": mapping, "maths": maths_rows, "event_counts": by_kind, "events": events,
+            "event_total": len(model.events), "annotations": [{"lap": a.lap, "t": _r(a.time, 2), "text": a.text,
+                                                               "category": a.category, "author": a.author}
+                                                              for a in model.annotations],
+            "limitations": limits}
 
 
 def _plain(o):

@@ -1,0 +1,22 @@
+{
+  "name": "Monza GP",
+  "venues": [
+    "monza"
+  ],
+  "lap_length_m": 5728.0,
+  "start_line": "main straight (as in the session this was made from)",
+  "note": "Corner numbers and names follow the circuit's own.",
+  "corners": [
+    {"number": 1, "name": "Variante del Rettifilo", "direction": "R", "start_m": 898, "end_m": 936},
+    {"number": 2, "name": "Variante del Rettifilo", "direction": "L", "start_m": 944, "end_m": 988},
+    {"number": 3, "name": "Curva Grande", "direction": "R", "start_m": 1246, "end_m": 1764},
+    {"number": 4, "name": "Variante della Roggia", "direction": "L", "start_m": 2092, "end_m": 2140},
+    {"number": 5, "name": "Variante della Roggia", "direction": "R", "start_m": 2148, "end_m": 2196},
+    {"number": 6, "name": "Lesmo 1", "direction": "R", "start_m": 2438, "end_m": 2638},
+    {"number": 7, "name": "Lesmo 2", "direction": "R", "start_m": 2800, "end_m": 2906},
+    {"number": 8, "name": "Variante Ascari", "direction": "L", "start_m": 3868, "end_m": 3946},
+    {"number": 9, "name": "Variante Ascari", "direction": "R", "start_m": 3962, "end_m": 4054},
+    {"number": 10, "name": "Variante Ascari", "direction": "L", "start_m": 4070, "end_m": 4174},
+    {"number": 11, "name": "Parabolica", "direction": "R", "start_m": 5040, "end_m": 5466}
+  ]
+}

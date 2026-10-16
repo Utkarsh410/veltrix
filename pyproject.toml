@@ -15,12 +15,21 @@ veltrix = "veltrix_engine.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+# Readers for formats that are not read natively. `all` installs every one.
+mdf = ["asammdf>=7.4"]
+aim = ["libxrk>=0.13"]
+mat = ["h5py>=3.8"]
+can = ["python-can>=4.2"]
+ui = ["PySide6>=6.6", "pyqtgraph>=0.13"]            # the desktop app (veltrix_app)
+all = ["asammdf>=7.4", "libxrk>=0.13", "h5py>=3.8", "python-can>=4.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 "veltrix_engine.report" = ["template.html"]
+"veltrix_engine.workspace" = ["page.html"]
+"veltrix_engine" = ["tracks/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

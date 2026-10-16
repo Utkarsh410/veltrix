@@ -36,7 +36,8 @@
  "warnings": [
   "Steering has no unit in the file and stays within \u00b12 \u2014 it looks like radians or a normalised value, not degrees. Channels computed from steering will be wrong until its unit is known.",
   "17 gap(s) in the log longer than 5 samples \u2014 the longest is 0.29 s at 0.9 s.",
-  "24 rows repeat the previous timestamp \u2014 the later row was kept."
+  "24 rows repeat the previous timestamp \u2014 the later row was kept.",
+  "steering and the position channels disagree about left and right (r = -0.63): either steering has the opposite sign to the schema, or the position plane is mirrored. The map and corner directions follow position as logged. Import with flip=(\"steering\",) or flip=(\"pos_y\",) once you know which."
  ],
  "laps": [
   {
@@ -2394,9 +2395,9 @@
   "acc_long_calc": {
    "n": 80501,
    "n_valid": 80501,
-   "mean": 0.009127318,
-   "std": 0.417047213,
-   "min": -9.237634137,
+   "mean": 0.009332797,
+   "std": 0.413853818,
+   "min": -5.783303148,
    "max": 1.064655221,
    "samples": [
     0.572932742,

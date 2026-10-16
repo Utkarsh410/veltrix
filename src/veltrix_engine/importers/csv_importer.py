@@ -17,43 +17,72 @@ import gzip
 import hashlib
 import io
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from .table import RawTable
+
 SEPARATORS = [",", ";", "\t", "|"]
 
 
-@dataclass
-class RawTable:
-    """A telemetry file as read: source columns, untouched."""
-    data: pd.DataFrame
-    units: dict = field(default_factory=dict)        # {column: unit} from the units row
-    info: dict = field(default_factory=dict)         # header metadata (venue, driver, ...)
-    beacons: np.ndarray | None = None                # lap-marker times [s]
-    sep: str = ","
-    decimal: str = "."
-    bad_cells: dict = field(default_factory=dict)    # {column: cells that weren't numbers}
-    skipped_rows: int = 0
-    source: str = ""
-    sha256: str = ""
+def _sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def read_csv(path: str | Path) -> RawTable:
-    """Read a telemetry CSV (optionally .gz) into a RawTable."""
+    """Read a telemetry CSV (optionally .gz) into a RawTable.
+
+    Only the start of the file is turned into text, to work out its layout;
+    the rows are then parsed straight from the file. A 260 MB export is never
+    held in memory as text, which used to cost more than the table itself."""
     path = Path(path)
-    raw = path.read_bytes()
-    sha = hashlib.sha256(raw).hexdigest()
-    if path.suffix == ".gz":
-        raw = gzip.decompress(raw)
-    table = parse_csv_text(raw.decode("utf-8-sig", errors="ignore"))
-    table.source, table.sha256 = path.name, sha
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rb") as f:
+        head = f.read(HEAD_BYTES)
+        more = bool(f.read(1))
+    text = head.decode("utf-8-sig", errors="ignore")
+    table = None
+    if "\r" not in text.replace("\r\n", ""):            # old-Mac line endings need the whole text; nothing else does
+        lines = text.replace("\r\n", "\n").split("\n")
+        if more:
+            lines = lines[:-1]
+        if lines:
+            layout = _layout(lines)
+            try:
+                with opener(path, "rb") as f:
+                    df = pd.read_csv(f, skiprows=layout["data_row"], encoding="utf-8", encoding_errors="ignore",
+                                     **_parse_options(layout))
+                table = _finish(df, lines, layout, 0)
+            except (pd.errors.ParserError, ValueError, UnicodeError):
+                table = None                              # malformed rows: the slower path below counts and skips them
+    if table is None:
+        with opener(path, "rb") as f:
+            table = parse_csv_text(f.read().decode("utf-8-sig", errors="ignore"))
+    table.source, table.sha256 = path.name, _sha256_of(path)
     return table
 
 
 HEAD_BYTES = 400_000      # the layout is worked out from the start of the file only
+
+
+def _layout(lines: list) -> dict:
+    """Where the table is in a file, from its first lines: delimiter, header row, first data row, decimal mark, names."""
+    sep = _detect_sep(lines)
+    header_row, data_row = _find_header_and_data(lines, sep) or (0, 1)
+    return {"sep": sep, "header_row": header_row, "data_row": data_row,
+            "decimal": _detect_decimal(lines[data_row:data_row + 200], sep),
+            "names": _unique(_split_row(lines[header_row], sep))}
+
+
+def _parse_options(layout: dict) -> dict:
+    return dict(sep=layout["sep"], decimal=layout["decimal"], header=None, names=layout["names"], skip_blank_lines=True,
+                index_col=False)
 
 
 def parse_csv_text(text: str) -> RawTable:
@@ -64,23 +93,25 @@ def parse_csv_text(text: str) -> RawTable:
         raise ValueError("The file is empty.")
     if len(text) > HEAD_BYTES:
         lines = lines[:-1]            # the last line of the head may be cut mid-row
-    sep = _detect_sep(lines)
-    header_row, data_row = _find_header_and_data(lines, sep) or (0, 1)
-    decimal = _detect_decimal(lines[data_row:data_row + 200], sep)
-    names = _unique(_split_row(lines[header_row], sep))
+    layout = _layout(lines)
 
     # Parse from the first data row: this drops the metadata block above the
     # header, and the units row and blank lines between the two.
-    offset = _line_offset(text, data_row)
-    kwargs = dict(sep=sep, decimal=decimal, header=None, names=names, skip_blank_lines=True,
-                  index_col=False)
+    offset = _line_offset(text, layout["data_row"])
+    kwargs = _parse_options(layout)
     skipped = 0
     try:
         df = pd.read_csv(io.StringIO(text[offset:]), **kwargs)
     except (pd.errors.ParserError, ValueError):
         df = pd.read_csv(io.StringIO(text[offset:]), on_bad_lines="skip", **kwargs)
         skipped = sum(1 for line in text[offset:].splitlines() if line.strip()) - len(df)
+    return _finish(df, lines, layout, skipped)
 
+
+def _finish(df: pd.DataFrame, lines: list, layout: dict, skipped: int) -> RawTable:
+    """Units, header metadata and cell checks for a parsed table."""
+    sep, decimal, names = layout["sep"], layout["decimal"], layout["names"]
+    header_row, data_row = layout["header_row"], layout["data_row"]
     units_row = _units_row(lines, header_row, data_row, sep) or []
     units = {c: u for c, u in zip(names, units_row) if u and set(u) != {"."}}
     info, beacons = _header_fields(lines[:header_row], sep, decimal)

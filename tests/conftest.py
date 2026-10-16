@@ -1,7 +1,13 @@
 """Shared fixtures: the golden datasets, loaded once per test run."""
 
 import json
+import os
+import tempfile
 from pathlib import Path
+
+# Nothing a test does may read or write the real app's saved maths channels, rules, notes or profiles.
+os.environ["VELTRIX_DATA_DIR"] = tempfile.mkdtemp(prefix="veltrix-tests-")
+
 
 import pytest
 

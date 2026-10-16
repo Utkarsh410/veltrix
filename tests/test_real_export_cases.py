@@ -282,3 +282,31 @@ def test_understeer_gradient_survives_the_coarse_export(coarse, synthetic):
     a, b = balance.steering_characteristic(coarse), balance.steering_characteristic(synthetic)
     assert a["ratio"] == pytest.approx(b["ratio"], rel=0.08)
     assert a["understeer_deg_per_g"] == pytest.approx(b["understeer_deg_per_g"], abs=0.05)
+
+
+# ── a few garbage samples must not defeat the checks ──────────────────────────
+
+def test_glitch_samples_do_not_block_the_unit_fix_the_rebuild_or_the_map(synth_raw):
+    """A second real export had a dozen samples reading over 1,000 in its g
+    channels (a crash or a reset to the pits). They hid the g / m/s² mislabel
+    and made damper roll look unrelated to lateral g, so no track map was drawn."""
+    from veltrix_engine.track import track_map
+    df = _degrade(synth_raw)[["Time", "LapNumber", "Speed", "SteeringAngle", "LateralAcc", "LongAcc",
+                              "SuspTravelFL", "SuspTravelFR", "SuspTravelRL", "SuspTravelRR"]].copy()
+    df.loc[20000:20010, "LateralAcc"] = -1448.0
+    df.loc[20011:20021, "LateralAcc"] = 1592.0
+    df.loc[20000:20010, "LongAcc"] = -1571.0
+    units = {"Time": "s", "Speed": "km/h", "LateralAcc": "m/s2", "LongAcc": "m/s2"}     # values are in g
+    s = build_session(parse_csv_text(export_layout(df, units)))
+
+    glitch = [w for w in s.warnings() if "Treated as glitches" in w]
+    assert len(glitch) == 2 and "read up to 1,592 in the file" in glitch[0]
+    assert any("behave like g" in w for w in s.warnings())            # the mislabel is still caught
+    assert "acc_lat" in s.rebuilt and s.rebuilt["acc_lat"]["r"] > 0.9   # and lateral g is still rebuilt
+    assert s.derived["acc_lat_rebuilt"].abs().max() < 2.5
+    assert track_map(s).attrs["source"] == "reconstructed"
+
+
+def test_real_spikes_are_kept(synthetic):
+    # nothing in a clean session is far enough outside the rest to be called a glitch
+    assert not any("Treated as glitches" in w for w in synthetic.warnings())

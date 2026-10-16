@@ -20,6 +20,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from . import circuits
 from . import laps as lap_engine
 from .derived import best_lat, lowpass
 from .vehicle import G
@@ -29,6 +30,10 @@ SMOOTH_M = 20.0               # smoothing of the cornering signal before detecti
 THRESHOLD = 0.30              # a corner is where the signal exceeds this share of its 95th percentile
 MIN_LENGTH_M = 20.0           # shorter than this is a kerb strike or a correction, not a corner
 MERGE_GAP_M = 25.0            # same-direction pieces closer than this are one corner
+HOLD = 0.5                    # ... or any distance apart, while the signal between them stays above this share of the threshold
+PEAK_MIN = 0.45               # a corner's peak must reach this share of the 95th percentile; less is a kink in a straight
+SPLIT_DIP = 0.5               # two peaks with the signal falling below this share of the smaller one are two corners
+SPLIT_SMOOTH_M = 60.0         # ... judged on a signal smoothed this much, so a bump or a noisy sample cannot split a corner
 SLOW_KMH, FAST_KMH = 110.0, 180.0     # corner class by minimum speed
 BRAKE_ON_FRACTION = 0.05      # brake counts as applied above this share of its session maximum
 BRAKE_ON_G = -0.3             # ... or, with no brake channel, below this longitudinal g
@@ -101,27 +106,30 @@ def _cornering_signal(frames: dict, step: float) -> tuple[np.ndarray, str]:
             curvature = np.gradient(heading, step)
             curvature[:2 * k], curvature[-2 * k:] = 0.0, 0.0        # smoothing edge effects
             signals.append((f["speed"].to_numpy() / 3.6) ** 2 * curvature / G)
-        signal = np.nanmedian(signals, axis=0)
-        # A position plane can be mirrored. Steering, when logged, settles left from right.
-        if "steering" in first:
-            steer = np.nanmedian([f["steering"].to_numpy() for f in frames.values()], axis=0)
-            if np.nansum(steer * signal) < 0:
-                signal = -signal
-        return signal, "path curvature from position"
+        # Left and right are taken from the position plane as logged; the import
+        # warns when that disagrees with the steering channel.
+        return np.nanmedian(signals, axis=0), "path curvature from position"
     if "acc_lat_calc" in first:
         return np.nanmedian([f["acc_lat_calc"].to_numpy() for f in frames.values()], axis=0), "steering and speed"
     raise ValueError("Corners need lateral g, a position channel, or steering.")
 
 
-def find_corners(session, laps=None, step: float = STEP_M) -> pd.DataFrame:
-    """Locate the corners of the lap from the data.
+def find_corners(session, laps=None, step: float = STEP_M, track="auto") -> pd.DataFrame:
+    """The corners of the lap.
+
+    track: "auto" (default) uses a circuit file from the library when one
+    matches the session's venue and fits its data — that gives the circuit's
+    own corner numbers and names. Pass a circuit dict to force one, or None to
+    always detect corners from the data.
 
     laps: laps to build the picture from (default: up to eight of the fastest
     flying laps; the median over them ignores one-off mistakes).
 
-    One row per corner: corner ("T1", ...), direction, start_m, apex_m (lowest
-    typical speed), end_m, zone_start_m, zone_end_m, min_speed (typical),
-    kind ("slow" / "medium" / "fast"). `attrs["source"]` names the signal used."""
+    One row per corner: corner ("T1", ...), name, direction, start_m, apex_m
+    (lowest typical speed), end_m, zone_start_m, zone_end_m, min_speed
+    (typical), kind ("slow" / "medium" / "fast"). `attrs["source"]` says where
+    the corners came from; `attrs["track"]` is the circuit file's name, if one
+    was used, and `attrs["track_note"]` explains a file that was rejected."""
     if laps is None:
         table = session.laps
         pool = table[table["status"] == "flying"].sort_values("lap_time_s")["lap"]
@@ -134,37 +142,93 @@ def find_corners(session, laps=None, step: float = STEP_M) -> pd.DataFrame:
 
     k = max(int(round(SMOOTH_M / step)), 1)
     smooth = np.convolve(np.nan_to_num(signal), np.ones(k) / k, mode="same")
+
+    # A circuit file, when one fits, decides the corners
+    track_note = ""
+    candidates = ([track] if isinstance(track, dict) else
+                  circuits.for_venue(session.raw.info.get("Venue", "")) if track == "auto" else [])
+    for t in candidates:
+        ok, why = circuits.fit(t, session.lap_length, grid, smooth)
+        if not ok:
+            track_note = f"Circuit file '{t['name']}' was not used: {why}."
+            continue
+        scale = session.lap_length / float(t["lap_length_m"])
+        rows = []
+        for c in t["corners"]:
+            a = int(np.clip(round(c["start_m"] * scale / step), 0, len(grid) - 1))
+            b = int(np.clip(round(c["end_m"] * scale / step), a + 1, len(grid) - 1))
+            apex = a + int(np.nanargmin(speed[a:b + 1]))
+            rows.append({"corner": f"T{c['number']}", "name": c.get("name", ""), "direction": c["direction"],
+                         "start_m": float(grid[a]), "apex_m": float(grid[apex]), "end_m": float(grid[b]),
+                         "min_speed": float(speed[apex])})
+        return _finish(pd.DataFrame(rows), session.lap_length,
+                       dict(source=f"circuit file ({t['name']})", track=t["name"], track_note=why,
+                            laps=list(laps), step=step))
+
     level = THRESHOLD * np.nanpercentile(np.abs(smooth), 95)
     side = np.where(smooth > level, 1, np.where(smooth < -level, -1, 0))
 
-    # Runs of one direction; then join same-direction runs across short gaps
+    # Runs of one direction. Same-direction runs are one corner when the gap is
+    # short, or when the car never stops cornering between them: lateral g
+    # often sags mid-corner under heavy braking without the corner ending.
     edges = np.flatnonzero(np.diff(np.r_[0, side, 0]) != 0)
     runs = [(a, b - 1, side[a]) for a, b in zip(edges[:-1], edges[1:]) if side[a] != 0]
     merged = []
     for a, b, d in runs:
-        if merged and merged[-1][2] == d and (a - merged[-1][1]) * step <= MERGE_GAP_M \
-                and not np.any(side[merged[-1][1] + 1:a] == -d):
-            merged[-1] = (merged[-1][0], b, d)
+        if merged and merged[-1][2] == d:
+            between = smooth[merged[-1][1] + 1:a] * d
+            if (a - merged[-1][1]) * step <= MERGE_GAP_M and not np.any(side[merged[-1][1] + 1:a] == -d) \
+                    or (len(between) and between.min() > HOLD * level):
+                merged[-1] = (merged[-1][0], b, d)
+                continue
+        merged.append((a, b, d))
+    p95 = np.nanpercentile(np.abs(smooth), 95)
+    runs = [(a, b, d) for a, b, d in merged
+            if (b - a) * step >= MIN_LENGTH_M and np.max(np.abs(smooth[a:b + 1])) >= PEAK_MIN * p95]
+
+    # A run with two clear peaks and a real sag between them is two corners
+    # taken one after the other in the same direction.
+    ks = max(int(round(SPLIT_SMOOTH_M / step)), 1)
+    broad = np.convolve(smooth, np.ones(ks) / ks, mode="same")
+    split = []
+    for a, b, d in runs:
+        seg = broad[a:b + 1] * d
+        cut = None
+        if (b - a) * step >= 3 * MIN_LENGTH_M:
+            lo = int(round(MIN_LENGTH_M / step))
+            best = None
+            for k in range(lo, len(seg) - lo):
+                left, right = seg[:k].max(), seg[k + 1:].max()
+                small = min(left, right)
+                if small >= PEAK_MIN * p95 and seg[k] < SPLIT_DIP * small and (best is None or seg[k] < seg[best]):
+                    best = k
+            cut = best
+        if cut is None:
+            split.append((a, b, d))
         else:
-            merged.append((a, b, d))
-    runs = [(a, b, d) for a, b, d in merged if (b - a) * step >= MIN_LENGTH_M]
+            split += [(a, a + cut, d), (a + cut + 1, b, d)]
+    runs = split
     if not runs:
         raise ValueError("No corners found — the cornering signal never rises clear of the straights.")
 
-    length = session.lap_length
     rows = []
     for i, (a, b, d) in enumerate(runs):
         apex = a + int(np.nanargmin(speed[a:b + 1]))
-        rows.append({"corner": f"T{i + 1}", "direction": "L" if d > 0 else "R",
+        rows.append({"corner": f"T{i + 1}", "name": "", "direction": "L" if d > 0 else "R",
                      "start_m": float(grid[a]), "apex_m": float(grid[apex]), "end_m": float(grid[b]),
                      "min_speed": float(speed[apex])})
-    corners = pd.DataFrame(rows)
+    return _finish(pd.DataFrame(rows), session.lap_length,
+                   dict(source=source, track=None, track_note=track_note, laps=list(laps), step=step))
+
+
+def _finish(corners: pd.DataFrame, length: float, attrs: dict) -> pd.DataFrame:
+    """Zones (the lap divided between the corners) and corner class."""
     mids = (corners["end_m"].to_numpy()[:-1] + corners["start_m"].to_numpy()[1:]) / 2
     corners["zone_start_m"] = np.r_[0.0, mids]
     corners["zone_end_m"] = np.r_[mids, length]
     corners["kind"] = np.where(corners["min_speed"] < SLOW_KMH, "slow",
                                np.where(corners["min_speed"] < FAST_KMH, "medium", "fast"))
-    corners.attrs.update(source=source, laps=list(laps), step=step)
+    corners.attrs.update(attrs)
     return corners
 
 

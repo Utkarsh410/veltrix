@@ -15,6 +15,10 @@ calculation is changed on purpose.
 | `logger_layout_3lap_20hz.csv` | Laps 1–3 of the same session laid out like a logger-software CSV export: metadata block, units row, 20 Hz, speed in m/s, accelerations in m/s², no lap channel. | Header parsing, units row, laps from beacon markers, low sample rate |
 | `monza_ac_gt3.csv.gz` | McLaren MP4-12C GT3 at Monza (1966 full course, 10,019 m) recorded in the Assetto Corsa simulator. Laps 0–4, one row per metre of track, with position. | Lap-distance resets, uneven time steps, repeated timestamps, track map from position, missing lateral g |
 
+In `monza_ac_gt3.csv.gz` the steering channel is positive in right-hand corners, the opposite
+of the schema, and its unit is not degrees. The engine warns about both. The file is kept as
+it is so those warnings stay covered.
+
 ## What these are not
 
 None of these is data from a real car. The synthetic session has known answers

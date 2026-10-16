@@ -1,0 +1,29 @@
+{
+  "name": "Silverstone GP",
+  "venues": [
+    "silverstone"
+  ],
+  "lap_length_m": 5787.0,
+  "start_line": "before Copse (as in the session this was made from)",
+  "note": "Corners are numbered in the order driven from the start/finish line, so Turn 1 is Copse. Club is one continuous right-hander counted as two turns; the split at 2,900 m is approximate.",
+  "corners": [
+    {"number": 1, "name": "Copse", "direction": "R", "start_m": 258, "end_m": 556},
+    {"number": 2, "name": "Maggotts", "direction": "L", "start_m": 790, "end_m": 910},
+    {"number": 3, "name": "Maggotts", "direction": "R", "start_m": 940, "end_m": 1062},
+    {"number": 4, "name": "Becketts", "direction": "L", "start_m": 1082, "end_m": 1202},
+    {"number": 5, "name": "Becketts", "direction": "R", "start_m": 1220, "end_m": 1386},
+    {"number": 6, "name": "Chapel", "direction": "L", "start_m": 1414, "end_m": 1528},
+    {"number": 7, "name": "Stowe", "direction": "R", "start_m": 2174, "end_m": 2446},
+    {"number": 8, "name": "Vale", "direction": "L", "start_m": 2724, "end_m": 2782},
+    {"number": 9, "name": "Club", "direction": "R", "start_m": 2792, "end_m": 2900},
+    {"number": 10, "name": "Club", "direction": "R", "start_m": 2902, "end_m": 3086},
+    {"number": 11, "name": "Abbey", "direction": "R", "start_m": 3424, "end_m": 3644},
+    {"number": 12, "name": "Farm", "direction": "L", "start_m": 3664, "end_m": 3852},
+    {"number": 13, "name": "Village", "direction": "R", "start_m": 3942, "end_m": 4060},
+    {"number": 14, "name": "The Loop", "direction": "L", "start_m": 4094, "end_m": 4222},
+    {"number": 15, "name": "Aintree", "direction": "L", "start_m": 4224, "end_m": 4430},
+    {"number": 16, "name": "Brooklands", "direction": "L", "start_m": 4942, "end_m": 5146},
+    {"number": 17, "name": "Luffield", "direction": "R", "start_m": 5162, "end_m": 5426},
+    {"number": 18, "name": "Woodcote", "direction": "R", "start_m": 5428, "end_m": 5756}
+  ]
+}

@@ -1,6 +1,13 @@
 """
-Command line: inspect a telemetry file with the engine.
+Command line: inspect a telemetry file with the engine. Every command takes any
+supported format (CSV, MoTeC .ld, iRacing .ibt, VBOX .vbo, AiM .xrk, MDF / MF4,
+MAT, CAN logs with a DBC); `veltrix formats` lists them.
 
+  veltrix app session.csv                 the desktop workspace: channel browser, charts, shared cursor
+  veltrix workspace my_project            open the workspace in the browser
+  veltrix engineer session.csv            the engineering report: nine sections, every conclusion with its evidence
+  veltrix formats
+  veltrix inspect bus.asc --dbc car.dbc
   veltrix inspect session.csv
   veltrix inspect session.csv --ref 5 --compare 11
   veltrix inspect session.csv --flip steering --wheelbase 2.463 --steer-ratio 12.5
@@ -26,8 +33,9 @@ from . import corners as corner_engine
 from . import laps as lap_engine
 from .analysis import advice, balance, gg, handling, tyres
 from .schema import CORNERS, tyre_temp_channel
+from .importers import supported_formats
 from .session import load_session
-from .track import track_xy
+from .track import track_map
 from .vehicle import VehicleParams
 
 
@@ -54,17 +62,90 @@ def _load(args):
     except ValueError:
         raise ValueError("--unit expects COLUMN=UNIT, for example --unit G_LAT=g")
     return load_session(args.file, vehicle=vehicle, flip=tuple(args.flip or ()), rate_hz=args.rate,
-                        units=units)
+                        units=units, dbc=args.dbc or None)
+
+
+def file_stem(path) -> str:
+    """A telemetry file's name without its extension ("run.csv.gz" -> "run")."""
+    name = Path(path).name
+    if name.lower().endswith(".gz"):
+        name = name[:-3]
+    return Path(name).stem or name
+
+
+def formats(args) -> int:
+    """List the file formats the engine reads."""
+    rows = supported_formats()
+    width = max(len(r["format"]) for r in rows)
+    for r in rows:
+        state = "ready" if r["ready"] else f"needs: {r['install']}"
+        print(f"  {r['format']:<{width}}  {r['extensions']:<22} {state}")
+        if r["remark"]:
+            print(f"  {'':<{width}}  {r['remark']}")
+    return 0
+
+
+def engineer(args) -> int:
+    """Print the engineering report of a telemetry file."""
+    from .analysis import engineering
+    s = _load(args)
+    result = engineering.analyse(s)
+    print(f"{Path(args.file).name} — {len(s.laps)} laps, {result['summary']['flying_laps']} flying, "
+          f"{result['summary']['findings']} findings\n")
+    print(engineering.to_text(result))
+    if args.json:
+        import json
+        Path(args.json).write_text(json.dumps(result, indent=1), encoding="utf-8")
+        print(f"\nReport data written to {args.json}")
+    if args.markdown:
+        Path(args.markdown).write_text(engineering.to_markdown(result, f"Performance engineering report — {Path(args.file).name}"),
+                                       encoding="utf-8")
+        print(f"\nReport written to {args.markdown}")
+    return 0
+
+
+def app(args) -> int:
+    """Open the desktop workspace window."""
+    try:
+        from veltrix_app.window import main as app_main
+    except ImportError as e:
+        raise ValueError(f"The desktop app needs PySide6 and pyqtgraph: pip install 'veltrix-engine[ui]'  ({e})") from None
+    return app_main([args.file] if args.file else [])
+
+
+def list_thresholds(args) -> int:
+    """Print every analysis threshold and its value (with any --thresholds file applied)."""
+    from . import thresholds as tuning
+    for key, value in tuning.snapshot().items():
+        print(f"  {key:<42} {value}")
+    return 0
+
+
+def workspace(args) -> int:
+    from .workspace import serve
+    serve(args.folder, port=args.port, open_browser=not args.no_browser)
+    return 0
 
 
 def report(args) -> int:
     from .report import write_report
     s = _load(args)
-    stem = Path(args.file).name.split(".csv")[0]
-    out = write_report(s, args.output or f"{stem}_report.html", title=args.title)
+    extra = ""
+    if not args.no_app_data:
+        # the maths channels, event rules and notes made in the desktop app belong in the report too
+        try:
+            from veltrix_app import extras
+            done = extras.apply(s, args.app_data)
+            made = sum(r.ok for r in done["maths"].values())
+            extra = f", {made} maths channel(s), {len(s.model.events)} candidate event(s), {done['notes']} note(s) from the app"
+            for line in done["problems"]:
+                print(f"Note: {line}", file=sys.stderr)
+        except ImportError:
+            pass
+    out = write_report(s, args.output or f"{file_stem(args.file)}_report.html", title=args.title)
     warnings = len(s.warnings())
     print(f"Report written to {out}  ({out.stat().st_size / 1024:.0f} KB, {len(s.laps)} laps, "
-          f"{warnings} warning{'s' if warnings != 1 else ''} from the import)")
+          f"{warnings} warning{'s' if warnings != 1 else ''} from the import{extra})")
     return 0
 
 
@@ -80,6 +161,7 @@ def inspect(args) -> int:
     for key in ("Venue", "Vehicle", "Driver", "Log Date", "Log Time"):
         if info.get(key):
             print(f"  {key:<10} {info[key]}")
+    print(f"  Format     {s.raw.format}")
     print(f"  Loaded     {len(s.raw.data):,} rows × {s.raw.data.shape[1]} columns in {elapsed:.1f} s")
     print(f"  Normalised {len(frame):,} samples at {s.rate_hz:g} Hz, "
           f"{frame['time'].iloc[-1] - frame['time'].iloc[0]:,.0f} s")
@@ -137,7 +219,9 @@ def inspect(args) -> int:
             print(f"\nCorners: not available ({e})")
     if corner_result:
         cs, summary = corner_result["corners"], corner_result["summary"].set_index("corner")
-        heading(f"Corners ({len(cs)} found from {cs.attrs['source']}; flying laps)")
+        heading(f"Corners ({len(cs)} from {cs.attrs['source']}; flying laps)")
+        if cs.attrs.get("track_note") and not cs.attrs.get("track"):
+            print(f"  {cs.attrs['track_note']}")
         print(f"  {'':<4} {'':>3} {'Kind':<7} {'From m':>7} {'Apex m':>7} {'To m':>7} {'Best s':>8} {'Lap':>4} "
               f"{'Mean s':>8} {'Spread':>7} {'On table':>9} {'Min km/h':>9}")
         for c in cs.itertuples():
@@ -146,7 +230,7 @@ def inspect(args) -> int:
             r = summary.loc[c.corner]
             print(f"  {c.corner:<4} {c.direction:>3} {c.kind:<7} {c.start_m:>7.0f} {c.apex_m:>7.0f} {c.end_m:>7.0f} "
                   f"{r.best_s:>8.3f} {str(r.best_lap):>4} {r.mean_s:>8.3f} {r.spread_s:>7.3f} "
-                  f"{r.available_s:>9.3f} {r.min_speed_mean:>9.0f}")
+                  f"{r.available_s:>9.3f} {r.min_speed_mean:>9.0f}  {c.name}".rstrip())
         ideal = corner_result["ideal_lap_s"]
         top = summary.sort_values("available_s", ascending=False).head(3)
         print(f"  Ideal lap (best time through every corner): {fmt_time(ideal)} ({ideal - best_time:+.3f} s vs best lap {best})")
@@ -245,7 +329,8 @@ def inspect(args) -> int:
         heading("Grip (against the reference envelope)")
         if rebuilt_line:
             print(rebuilt_line)
-        g = gg.gg_summary(s)
+        flying_only = list(s.laps.loc[s.laps["status"] == "flying", "lap"]) or None
+        g = gg.gg_summary(s, laps=flying_only)
         print(f"  Peak lateral {g['peak_lat_g']:.2f} g · braking {g['peak_brake_g']:.2f} g · "
               f"drive {g['peak_drive_g']:.2f} g · combined {g['peak_combined_g']:.2f} g")
         print(f"  Mean utilisation {g['mean_util']:.0%} of {s.vehicle.grip_limit_g:g} g; "
@@ -305,11 +390,15 @@ def inspect(args) -> int:
             print(f"  Stint {stint}: fewer than three usable laps")
 
     try:
-        xy = track_xy(s, lap=best)
-        print(f"\nTrack map for lap {best}: {len(xy):,} points, source: {xy.attrs['source']}")
+        xy = track_map(s)
+        how = xy.attrs["source"]
+        if how == "reconstructed":
+            how += (f" from speed and lateral g, closed (ends were {xy.attrs['gap_m']:.0f} m apart before closing)"
+                    if xy.attrs["closed"] else " from speed and lateral g; could not be closed into a lap")
+        print(f"\nTrack map: {len(xy):,} points, {xy.attrs['direction']}, {how}")
     except ValueError:
         xy = None
-        print("\nTrack map: not available (no position, or no speed and lateral g)")
+        print("\nTrack map: not available (no position, or no speed and usable lateral g)")
 
     # ── export ─────────────────────────────────────────────────────────────
     if args.export:
@@ -339,6 +428,24 @@ def inspect(args) -> int:
     return 0
 
 
+def circuit(args) -> int:
+    """Draft a circuit file from the corners found in a session."""
+    from . import circuits
+    s = _load(args)
+    found = corner_engine.find_corners(s, track=None)
+    draft = circuits.draft_from_session(s, found, args.name)
+    stem = "".join(ch if ch.isalnum() else "_" for ch in draft["name"].lower()).strip("_") or "circuit"
+    out = Path(args.output) if args.output else circuits.TRACK_DIR / f"{stem}.json"
+    if out.exists() and not args.force:
+        raise ValueError(f"{out} already exists (use --force to replace it, or -o to write elsewhere).")
+    circuits.save(draft, out)
+    print(f"{len(found)} corners found from {found.attrs['source']}; lap {draft['lap_length_m']:.0f} m.")
+    print(f"Circuit file written to {out}")
+    print("Edit it to give each corner the circuit's own number and name, and to split or merge corners "
+          "where the circuit counts them differently. It is used automatically for files from this venue.")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="veltrix", description="Veltrix Data analysis engine")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -349,16 +456,53 @@ def main(argv=None) -> int:
         p.add_argument("--unit", nargs="*", metavar="COLUMN=UNIT",
                        help="state a column's unit, overriding the file (e.g. G_LAT=g)")
         p.add_argument("--rate", type=float, help="resample rate in Hz (default: the file's own)")
+        p.add_argument("--thresholds", metavar="FILE",
+                       help="JSON file overriding analysis thresholds (veltrix thresholds lists them)")
+        p.add_argument("--dbc", nargs="*", metavar="FILE",
+                       help="DBC file(s) to decode a CAN log with (default: the .dbc files beside it)")
         p.add_argument("--wheelbase", dest="wheelbase_m", type=float)
         p.add_argument("--steer-ratio", dest="steer_ratio", type=float)
         p.add_argument("--mass", dest="mass_kg", type=float)
         p.add_argument("--grip-limit", dest="grip_limit_g", type=float)
 
+    w = sub.add_parser("workspace", help="open the telemetry workspace: drop in files of any format, browse sessions")
+    w.add_argument("folder", nargs="?", default="veltrix_workspace", help="project folder (created if missing)")
+    w.add_argument("--port", type=int, default=8765)
+    w.add_argument("--no-browser", action="store_true", help="do not open the browser")
+    w.set_defaults(func=workspace)
+
+    a = sub.add_parser("app", help="open the desktop workspace: channel browser, stacked charts, shared cursor")
+    a.add_argument("file", nargs="?", help="a telemetry file to open")
+    a.set_defaults(func=app)
+
+    th = sub.add_parser("thresholds", help="list every analysis threshold and its value")
+    th.set_defaults(func=list_thresholds)
+
+    f = sub.add_parser("formats", help="list the file formats the engine reads")
+    f.set_defaults(func=formats)
+
     r = sub.add_parser("report", help="write a self-contained HTML report of a telemetry file")
     import_options(r)
     r.add_argument("-o", "--output", metavar="FILE", help="where to write the page (default: <file>_report.html)")
     r.add_argument("--title", help="page title (default: venue and vehicle from the file)")
+    r.add_argument("--no-app-data", action="store_true",
+                   help="leave out the maths channels, event rules and notes made in the desktop app")
+    r.add_argument("--app-data", metavar="DIR", help="read those from this folder instead of the app's own")
     r.set_defaults(func=report)
+
+    e = sub.add_parser("engineer", help="the engineering report: lap potential, driver, braking, cornering, traction, "
+                                        "tyres, balance, incidents and setup hypotheses, each with its evidence")
+    import_options(e)
+    e.add_argument("--json", metavar="FILE", help="also write the report as JSON")
+    e.add_argument("--markdown", metavar="FILE", help="also write the report as Markdown")
+    e.set_defaults(func=engineer)
+
+    c = sub.add_parser("circuit", help="draft a circuit file (official corner numbers and names) from a session")
+    import_options(c)
+    c.add_argument("-o", "--output", metavar="FILE", help="where to write it (default: the engine's circuit library)")
+    c.add_argument("--name", help="circuit name (default: the venue in the file)")
+    c.add_argument("--force", action="store_true", help="replace an existing circuit file")
+    c.set_defaults(func=circuit)
 
     p = sub.add_parser("inspect", help="load a telemetry file and print what the engine makes of it")
     import_options(p)
@@ -369,7 +513,9 @@ def main(argv=None) -> int:
     p.set_defaults(func=inspect)
     args = ap.parse_args(argv)
     try:
-        return args.func(args)
+        from . import thresholds as tuning
+        with tuning.use(tuning.load(args.thresholds) if getattr(args, "thresholds", None) else None):
+            return args.func(args)
     except (ValueError, KeyError, FileNotFoundError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1

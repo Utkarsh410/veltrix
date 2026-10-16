@@ -86,13 +86,16 @@ def test_explain_names_only_what_points_the_same_way_as_the_time():
     assert C.explain({"d_time_s": 0.2, "d_min_speed": 0.1}) == "no single difference stands out"
 
 
-def test_corners_from_position_do_not_depend_on_how_the_map_is_drawn(monza):
+def test_corners_from_position_follow_the_plane_and_conflicts_are_reported(monza):
     found = C.find_corners(monza)
     assert found.attrs["source"] == "path curvature from position" and len(found) >= 6
-    raw = read_csv(GOLDEN / "monza_ac_gt3.csv.gz")
-    raw.data["PosY"] = -raw.data["PosY"]                         # the same lap on a mirrored map
-    mirrored = C.find_corners(build_session(raw))
-    assert list(mirrored["direction"]) == list(found["direction"])   # steering settles left from right
+    # In this file the steering turns the opposite way to the path: reported, not silently resolved
+    assert any("disagree about left and right" in w for w in monza.warnings())
+    flipped = build_session(read_csv(GOLDEN / "monza_ac_gt3.csv.gz"), flip=("steering",))
+    assert not any("disagree about left and right" in w for w in flipped.warnings())
+    assert list(C.find_corners(flipped)["direction"]) == list(found["direction"])   # position decides, either way
+    mirrored = C.find_corners(build_session(read_csv(GOLDEN / "monza_ac_gt3.csv.gz"), flip=("pos_y",)))
+    assert list(mirrored["direction"]) == ["R" if d == "L" else "L" for d in found["direction"]]
     assert np.allclose(mirrored["apex_m"], found["apex_m"], atol=6)
 
 

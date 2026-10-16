@@ -23,6 +23,7 @@ COARSE_SPEED_CUTOFF_HZ = 2.0    # d(speed)/dt filter when speed is recorded in c
 ROLL_CUTOFF_HZ = 5.0            # bandwidth of lateral g rebuilt from damper roll
 ROLL_MIN_SPEED_KMH = 60.0       # calibrate above this speed, away from pit-lane and kerb crawling
 ROLL_MIN_R = 0.8                # weakest roll-to-lateral-g correlation accepted for a rebuild
+MAX_LONG_G = 6.0                # beyond this, d(speed)/dt is a jump in the speed channel, not the car
 
 
 def best_lat(frame) -> str | None:
@@ -122,6 +123,15 @@ def compute_derived(channels: pd.DataFrame, fs_hz: float, vehicle: VehicleParams
             out["acc_long_calc"] = lowpass(np.gradient(v, dt) / G, 15.0, fs_hz)
     else:
         notes.append("No speed channel — no derived channels that depend on speed.")
+
+    if "acc_long_calc" in out:
+        # A reset to the pits or a dropped sample makes speed jump; that is not an acceleration
+        jump = out["acc_long_calc"].abs() > MAX_LONG_G
+        if jump.any():
+            out.loc[jump, "acc_long_calc"] = np.nan
+            out["acc_long_calc"] = out["acc_long_calc"].interpolate(limit_direction="both")
+            notes.append(f"acc_long_calc: {int(jump.sum())} samples above {MAX_LONG_G:g} g come from jumps in the speed "
+                         "channel (a reset or a dropped sample) and are bridged from the samples either side.")
 
     if has("steering"):
         out["steering_rate"] = lowpass(np.gradient(arr("steering"), dt), 10.0, fs_hz)
