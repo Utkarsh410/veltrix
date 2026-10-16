@@ -31,6 +31,10 @@ class MapDock(QtWidgets.QDockWidget):
         self.marker = pg.ScatterPlotItem(size=14, pen=pg.mkPen("#0A0A0D", width=2), brush=pg.mkBrush("#F4F2F8"))
         self.notes = pg.ScatterPlotItem(size=13, symbol="d", pen=pg.mkPen("#0A0A0D", width=1), brush=pg.mkBrush("#E0B25C"),
                                         hoverable=True, tip=lambda x, y, data: str(data))
+        self.zone_ticks = self.plot.plot([], [], pen=pg.mkPen("#B8B5C4", width=2), connect="pairs")
+        self.zone_lit = self.plot.plot([], [], pen=pg.mkPen("#E0B25C", width=5))
+        self.labels: list = []
+        self.corners = None
         self.plot.addItem(self.dots)
         self.plot.addItem(self.notes)
         self.plot.addItem(self.marker)
@@ -75,6 +79,49 @@ class MapDock(QtWidgets.QDockWidget):
         self.line.setData(np.r_[x, x[0]] if self.map.closed else x, np.r_[y, y[0]] if self.map.closed else y)
         self.plot.autoRange()
         self.set_cursor(cursor)
+
+    def set_corners(self, corners):
+        """Mark where each corner's zone begins, and label each corner at its apex:
+        the circuit's own number and name, or "T5 ?" for a corner found in the data."""
+        for item in self.labels:
+            self.plot.removeItem(item)
+        self.labels, self.corners = [], corners
+        self.zone_ticks.setData([], [])
+        self.zone_lit.setData([], [])
+        if not self.map or corners is None or not len(corners):
+            return
+        m = self.map
+        at = lambda d: (float(np.interp(d, m.dist, m.x)), float(np.interp(d, m.dist, m.y)))
+        span = max(float(np.ptp(m.x)), float(np.ptp(m.y)), 1.0)
+        xs, ys = [], []
+        for c in corners.itertuples():
+            d = float(c.zone_start_m)
+            (x0, y0), (x1, y1) = at(d - 3.0), at(d + 3.0)
+            nx, ny = -(y1 - y0), x1 - x0                    # across the track at the boundary
+            n = np.hypot(nx, ny) or 1.0
+            half = 0.018 * span
+            px, py = at(d)
+            xs += [px - nx / n * half, px + nx / n * half]
+            ys += [py - ny / n * half, py + ny / n * half]
+            official = getattr(c, "basis", "inferred") == "circuit file"
+            text = c.corner + ("" if official else " ?")
+            label = pg.TextItem(text, color="#F4F2F8" if official else "#B8B5C4", anchor=(0.5, 1.2))
+            label.setToolTip((f"{c.corner} {c.name} — official turn" if official and c.name else
+                              f"{c.corner} — official turn" if official else
+                              f"{c.corner} — found in the data, not the circuit's own number"))
+            label.setPos(*at(float(c.apex_m)))
+            self.plot.addItem(label)
+            self.labels.append(label)
+        self.zone_ticks.setData(xs, ys)
+
+    def highlight(self, corner: str | None):
+        """Draw one corner's zone brighter (None: none)."""
+        if not self.map or self.corners is None or corner is None:
+            self.zone_lit.setData([], [])
+            return
+        c = self.corners.set_index("corner").loc[corner]
+        d = np.linspace(float(c.zone_start_m), float(c.zone_end_m), 80)
+        self.zone_lit.setData(np.interp(d, self.map.dist, self.map.x), np.interp(d, self.map.dist, self.map.y))
 
     def set_notes(self, annotations: list) -> int:
         """Mark each timed note where on the lap it was made. Returns how many could be placed."""

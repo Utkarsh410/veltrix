@@ -26,7 +26,10 @@ def test_report_data_matches_the_session(synthetic):
     assert all(len(d["traces"]["2"][k]) == n for k in ("v", "thr", "brk"))
     assert d["traces"]["2"]["t"][0] == pytest.approx(0.0, abs=0.05)
     assert len(d["sectors"]) == 4 and d["meta"]["theoretical"] <= min(s["time"] for s in d["sectors"])
-    assert d["gg"]["summary"]["peak_lat_g"] == pytest.approx(1.83, abs=0.05)
+    # the headline peak is the held value; the single highest sample is kept beside it
+    assert d["gg"]["summary"]["peak_lat_instant_g"] == pytest.approx(1.83, abs=0.05)
+    assert d["gg"]["summary"]["peak_lat_g"] == pytest.approx(1.76, abs=0.05)
+    assert d["gg"]["summary"]["peak_lat_g"] <= d["gg"]["summary"]["peak_lat_instant_g"]
     assert d["balance"]["ratio"] == pytest.approx(14.0, abs=0.7)
     assert d["balance"]["lltd"] == pytest.approx(53.0, abs=1.0)
     assert d["rebuilt"] == {}

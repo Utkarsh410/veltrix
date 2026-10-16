@@ -122,6 +122,21 @@ worked out place for place). **Aligned by** switches between:
   where time is gained or lost.
 - **Time** — the same x is the same moment of each lap, not the same place.
 
+**Corner by corner.** With two or more laps loaded, a table under the charts
+sets the reference lap against one other lap (pick it in **Against** when more
+than two are loaded), one row per corner: time in the corner's zone, braking
+point, brake release, minimum speed, throttle-on and exit speed — each cell
+"reference → this lap" — and what differed. Braking point and release are
+metres from the corner's turn-in, throttle-on metres after its apex: fixed
+points, the same for every lap, so they can be found on track. "flat" means the
+throttle was never lifted. Click a row to zoom the charts to that corner and
+light it on the track map. Corners marked **inferred** were found in the data:
+their numbers are this app's, not the circuit's (a circuit file gives the
+official ones). Drag the bar above the table to share the height differently.
+
+On the **track map**, a tick across the track marks where each corner's zone
+begins, and each corner is labelled at its apex — "T5 ?" for an inferred corner.
+
 The line above the charts always says which mode is showing. Click or drag in
 a chart to move the cursor: beside each drawn measure the panel shows one
 value per loaded lap, in the lap's colour, and the map, video and **At the

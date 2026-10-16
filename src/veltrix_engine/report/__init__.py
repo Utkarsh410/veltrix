@@ -88,7 +88,8 @@ def report_data(session, title: str | None = None) -> dict:
             found = corner_engine.find_corners(s)
             metrics = corner_engine.corner_metrics(s, found)
             summary = corner_engine.corner_summary(s, found, metrics)
-            fields = ("zone_time_s", "entry_speed", "min_speed", "exit_speed", "brake_m", "throttle_on_m")
+            fields = ("zone_time_s", "entry_speed", "min_speed", "exit_speed", "brake_m", "throttle_on_m",
+                      "brake_before_m", "release_after_turn_in_m", "throttle_after_apex_m", "min_throttle")
             per_lap = {}
             for lap, part in metrics.groupby("lap"):
                 part = part.set_index("corner").reindex(found["corner"])
@@ -99,7 +100,8 @@ def report_data(session, title: str | None = None) -> dict:
                 "track": found.attrs.get("track"), "track_note": found.attrs.get("track_note", ""),
                 "list": [{"corner": c.corner, "name": c.name, "dir": c.direction, "kind": c.kind, "start": _r(c.start_m, 0),
                           "apex": _r(c.apex_m, 0), "end": _r(c.end_m, 0), "z0": _r(c.zone_start_m, 0),
-                          "z1": _r(c.zone_end_m, 0)} for c in found.itertuples()],
+                          "z1": _r(c.zone_end_m, 0), "basis": getattr(c, "basis", "inferred")}
+                         for c in found.itertuples()],
                 "laps": per_lap,
                 "summary": [{"corner": r.corner, "best": _r(r.best_s), "best_lap": r.best_lap, "mean": _r(r.mean_s),
                              "spread": _r(r.spread_s), "available": _r(r.available_s),

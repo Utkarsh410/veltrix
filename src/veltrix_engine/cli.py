@@ -334,7 +334,7 @@ def inspect(args) -> int:
             print(rebuilt_line)
         flying_only = list(s.laps.loc[s.laps["status"] == "flying", "lap"]) or None
         g = gg.gg_summary(s, laps=flying_only)
-        print(f"  Peak lateral {g['peak_lat_g']:.2f} g · braking {g['peak_brake_g']:.2f} g · "
+        print(f"  Peak (held 0.25 s) lateral {g['peak_lat_g']:.2f} g · braking {g['peak_brake_g']:.2f} g · "
               f"drive {g['peak_drive_g']:.2f} g · combined {g['peak_combined_g']:.2f} g")
         print(f"  Mean utilisation {g['mean_util']:.0%} of {s.vehicle.grip_limit_g:g} g; "
               f"above 75%: {g['frac_above_75']:.0%} of samples")

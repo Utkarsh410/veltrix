@@ -257,6 +257,7 @@ dl.narrow { max-width: 560px; }
 
   <section class="tabpanel" role="tabpanel" id="panel-corners" aria-labelledby="tab-corners">
     <h3>The two laps, corner by corner</h3>
+    <p class="sub" id="cornerBasis"></p>
     <div class="scroll"><table id="cornerTable"></table></div>
     <h3>Each corner across the flying laps</h3>
     <p class="sub" id="cornerSumSub"></p>
@@ -342,8 +343,8 @@ $("figures").innerHTML = [
   D.corners ? [fmt(D.corners.ideal), `Ideal lap by corner, ${sign(D.corners.ideal - best.time)} s`]
     : M.theoretical ? [fmt(M.theoretical), `Theoretical best, ${sign(M.theoretical - best.time)} s`] : null,
   [`${laps.length} / ${D.stints.length}`, "Laps / stints"],
-  D.gg ? [`${D.gg.summary.peak_lat_g.toFixed(2)} g`, "Peak lateral" + (D.rebuilt.acc_lat ? ", rebuilt" : "")] : null,
-  D.gg ? [`${D.gg.summary.peak_brake_g.toFixed(2)} g`, "Peak braking" + (D.rebuilt.acc_long_calc ? ", rebuilt" : "")] : null,
+  D.gg ? [`${D.gg.summary.peak_lat_g.toFixed(2)} g`, "Peak lateral, held 0.25 s" + (D.rebuilt.acc_lat ? ", rebuilt" : "")] : null,
+  D.gg ? [`${D.gg.summary.peak_brake_g.toFixed(2)} g`, "Peak braking, held 0.25 s" + (D.rebuilt.acc_long_calc ? ", rebuilt" : "")] : null,
 ].filter(Boolean).map(([v, k]) => `<div class="fig"><div class="v">${v}</div><div class="k">${k}</div></div>`).join("");
 
 // ── suggestions ────────────────────────────────────────────────────────────
@@ -656,7 +657,15 @@ function drawMap() {
     svg.append(el("path", { d: e.kind === "oversteer" ? `M${ex} ${ey - r}L${ex + r} ${ey}L${ex} ${ey + r}L${ex - r} ${ey}Z` : `M${ex - r + 1} ${ey - r + 1}h${2 * r - 2}v${2 * r - 2}h${-(2 * r - 2)}Z`, fill: "var(--panel)", stroke: col, "stroke-width": 2 }));
   }
 
-  // corners: a ring at the apex and a label just off the track, kept clear of marks and other labels
+  // corner zones: a tick across the track where each zone begins
+  if (D.corners) for (const c of D.corners.list) {
+    const i = Math.max(0, Math.min(n - 1, Math.round(c.z0 / STEP))), s = normal(i);
+    if (c.z0 > 1) svg.append(el("line", { x1: px(i) - s.nx * 9, y1: py(i) - s.ny * 9, x2: px(i) + s.nx * 9, y2: py(i) + s.ny * 9,
+      stroke: "var(--faint)", "stroke-width": 1.5 }));
+  }
+
+  // corners: a ring at the apex and a label just off the track, kept clear of marks and other labels;
+  // "T5 ?" marks a corner found in the data rather than the circuit's own turn
   if (D.corners) for (const c of D.corners.list) {
     const i = Math.max(0, Math.min(n - 1, Math.round(c.apex / STEP))), s = normal(i);
     svg.append(el("circle", { cx: px(i), cy: py(i), r: 4, fill: "var(--panel)", stroke: "var(--fg)", "stroke-width": 1.5 }));
@@ -669,7 +678,7 @@ function drawMap() {
     if (!spot) spot = [px(i) + s.nx * 20, py(i) + s.ny * 20];
     placed.push(spot);
     svg.append(el("line", { x1: px(i) + (spot[0] - px(i)) * 0.25, y1: py(i) + (spot[1] - py(i)) * 0.25, x2: px(i) + (spot[0] - px(i)) * 0.62, y2: py(i) + (spot[1] - py(i)) * 0.62, stroke: "var(--faint)", "stroke-width": 1 }));
-    svg.append(el("text", { class: "lbl", x: spot[0], y: spot[1] + 4, "text-anchor": "middle" }, c.corner));
+    svg.append(el("text", { class: "lbl", x: spot[0], y: spot[1] + 4, "text-anchor": "middle" }, c.corner + (c.basis === "circuit file" ? "" : " ?")));
   }
 
   // the cursor: a dot that follows the charts, and follows the pointer on the map
@@ -770,9 +779,18 @@ function drawCorners() {
   say(worst);
 
   const cell = (v, n = 0, unit = "") => v == null ? "—" : sign(v, n) + unit;
-  $("cornerTable").innerHTML = `<thead><tr><th>Corner</th><th>Δ time s</th><th>Entry km/h</th><th>Brake point m</th><th>Min speed km/h</th><th>Throttle on m</th><th>Exit km/h</th><th class="txt">What differed</th></tr></thead><tbody>` +
-    rows.map(r => `<tr><td>${cname(r.c)} · ${r.c.dir} · ${r.c.kind}</td><td>${sign(r.d.time)}</td><td>${cell(r.d.entry)}</td><td>${cell(r.d.brake)}</td><td>${r.a[F.min_speed].toFixed(0)} → ${r.b[F.min_speed].toFixed(0)}</td><td>${cell(r.d.thr)}</td><td>${cell(r.d.exit)}</td><td class="txt">${esc(r.finding)}</td></tr>`).join("") +
+  const num = v => v == null ? "—" : v.toFixed(0).replace("-", "−");
+  const flat = row => row[F.min_throttle] != null && row[F.min_throttle] >= 95;
+  const pair = (r, f, isThr) => `${isThr && flat(r.a) ? "flat" : num(r.a[F[f]])} → ${isThr && flat(r.b) ? "flat" : num(r.b[F[f]])}`;
+  const official = CN.list.every(c => c.basis === "circuit file");
+  $("cornerTable").innerHTML = `<thead><tr><th>Corner</th><th>Δ time s</th><th>Braking point<br>m before turn-in</th><th>Brake release<br>m after turn-in</th><th>Min speed<br>km/h</th><th>Throttle on<br>m after apex</th><th>Exit speed<br>km/h</th><th class="txt">What differed</th></tr></thead><tbody>` +
+    rows.map(r => `<tr><td>${cname(r.c)}${r.c.basis === "circuit file" ? "" : " · inferred"} · ${r.c.dir} · ${r.c.kind}</td><td>${sign(r.d.time)}</td>` +
+      `<td>${pair(r, "brake_before_m")}</td><td>${pair(r, "release_after_turn_in_m")}</td><td>${pair(r, "min_speed")}</td>` +
+      `<td>${pair(r, "throttle_after_apex_m", true)}</td><td>${pair(r, "exit_speed")}</td><td class="txt">${esc(r.finding)}</td></tr>`).join("") +
     `</tbody>`;
+  $("cornerBasis").textContent = (official ? `Official turns from the ${CN.source}.` :
+    `Corner numbers are inferred from the data (${CN.source}), not the circuit's own: no circuit file fits this session.`) +
+    ` Each cell is lap ${a} → lap ${b}. Braking point and release are measured from the corner's turn-in, throttle-on from its apex — fixed points, the same for every lap.`;
 }
 if (CN) {
   const order = [...CN.summary].sort((p, q) => q.available - p.available).slice(0, 3);

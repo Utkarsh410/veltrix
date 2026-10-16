@@ -191,7 +191,8 @@ def test_laps_are_loaded_from_the_panel_on_the_left(tmp_path, monza):
     for _ in range(3):
         app.processEvents()
     heights = [p.vb.sceneBoundingRect().height() for p in view._plots]
-    assert max(heights) - min(heights) <= 2 and min(heights) > 60, heights
+    # even; and still usable in a 700 px window with the corner table taking its share underneath
+    assert max(heights) - min(heights) <= 2 and min(heights) > 45, heights
     if shot:
         w.grab().save(shot.replace(".png", "_fewer.png"))
     panel.unload.click()
@@ -202,4 +203,59 @@ def test_laps_are_loaded_from_the_panel_on_the_left(tmp_path, monza):
     if shot:
         w.grab().save(shot.replace(".png", "_session.png"))
     assert w.loaded_laps() == [] and w.tabs.currentIndex() == 0
+    w.close()
+
+
+def test_corner_by_corner_table_under_the_overlaid_laps(tmp_path, monza):
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PySide6")
+    from PySide6 import QtWidgets
+    from veltrix_engine import corners as corner_engine
+    from veltrix_app.window import MainWindow
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+    w = MainWindow(tmp_path / "maths.json")
+    w.resize(1500, 950)
+    w.show()
+    w.show_session(monza)
+    view, table = w.compare, w.compare.corner_table
+    found = corner_engine.find_corners(monza)
+
+    # the map marks every corner's zone and labels it, inferred corners with a "?"
+    assert len(w.map.labels) == len(found) and w.map.labels[0].toPlainText() == "T1 ?"
+    assert len(w.map.zone_ticks.getData()[0]) == 2 * len(found)
+
+    w.load_laps([4])
+    assert table.rowCount() == 0 and "Load a second lap" in view.corner_note.text()
+    w.load_laps([4, 1])
+    app.processEvents()
+    assert table.rowCount() == len(found) and "lap 1 against lap 4 (reference)" in view.corner_title.text()
+    assert "inferred from the data" in view.corner_note.text() and "turn-in" in view.corner_note.toolTip()
+    assert not view.against.isVisible(), "with two laps there is nothing to choose"
+    headers = [table.horizontalHeaderItem(k).text() for k in range(table.columnCount())]
+    assert headers[2].startswith("Braking point") and headers[5].startswith("Throttle on")
+    t = corner_engine.pass_comparison(corner_engine.analyse(monza)["metrics"], found, 4, 1).set_index("corner")
+    row = next(r for r in range(table.rowCount()) if table.item(r, 0).data(0x0100) == "T1")
+    assert table.item(row, 1).text() == f"{t.loc['T1', 'd_zone_time_s']:+.2f}"
+    assert table.item(row, 2).text() == f"{t.loc['T1', 'ref_brake_before_m']:.0f} → {t.loc['T1', 'lap_brake_before_m']:.0f}"
+    assert table.item(row, 7).text() == t.loc["T1", "finding"]
+    assert table.item(row, 0).text().endswith("· inferred")
+
+    # a click zooms the charts to the corner, puts the cursor on its apex and lights it on the map
+    table.selectRow(row)
+    c = found.set_index("corner").loc["T1"]
+    lo, hi = view._plots[0].viewRange()[0]
+    assert lo <= c.zone_start_m + 5 and hi >= c.zone_end_m - 5 and hi - lo < 2 * (c.zone_end_m - c.zone_start_m)
+    assert view.cursor_x == pytest.approx(c.apex_m)
+    assert len(w.map.zone_lit.getData()[0]) > 0
+
+    # with three laps the comparison lap can be chosen
+    w.load_laps([4, 1, 2])
+    assert view.against.isVisibleTo(view) and view.against.count() == 2
+    view.against.setCurrentIndex(1)
+    assert "lap 2 against lap 4" in view.corner_title.text()
+    shot = os.environ.get("VELTRIX_SCREENSHOT")
+    if shot:
+        app.processEvents()
+        w.grab().save(shot.replace(".png", "_corners.png"))
     w.close()

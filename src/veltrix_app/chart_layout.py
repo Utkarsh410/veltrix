@@ -57,6 +57,7 @@ class EvenRows(QtCore.QObject):
 
 GLYPH = ("━━", "╍╍", "┅┅")   # what solid, dashed and dotted lines look like in a key
 KEY_COLOUR = "#B8B5C4"
+KEY_HEIGHT = 18           # pixels for the key strip above each chart
 
 
 def set_key(plot, entries: list, prefix: str = ""):
@@ -70,3 +71,4 @@ def set_key(plot, entries: list, prefix: str = ""):
     plot.key = [text for text, _, _ in entries]
     plot.titleLabel.opts["justify"] = "left"
     plot.setTitle("&nbsp;&nbsp;&nbsp;".join(parts) or "&nbsp;", size="9pt")
+    plot.layout.setRowFixedHeight(0, KEY_HEIGHT)          # a slim strip: the charts keep the height

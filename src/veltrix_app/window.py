@@ -19,7 +19,7 @@ import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from veltrix_engine import build_session, read_file, supported_formats
+from veltrix_engine import build_session, corners as corner_engine, read_file, supported_formats
 from veltrix_engine.importers import inspect_file
 from veltrix_engine.report import write_report
 
@@ -108,6 +108,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.tabBar().hide()                        # which one shows follows whether laps are loaded
         self.compare.lapsChanged.connect(self._laps_changed)
         self.compare.cursorMoved.connect(self._lap_cursor_moved)
+        self.compare.cornerChosen.connect(lambda corner: self.map.highlight(corner))
         self.setCentralWidget(self.tabs)
         self._build_browser()
         self._build_readout()
@@ -433,6 +434,7 @@ class MainWindow(QtWidgets.QMainWindow):
         failed = [n for n, r in self.maths.compute(session.model).items() if not r.ok]
         self._maths_seen = set(self.maths.mset.channels)
         self.map.set_session(session, self.ws.cursor if self.ws.cursor is not None else 0.0)
+        self._corner_analysis(session)
         source = Path(path).name if path else (session.raw.source or "session")
         self._fill_browser()
         self.panel.set_session(Path(source).name, session.model.laps, self._measures())
@@ -553,6 +555,17 @@ class MainWindow(QtWidgets.QMainWindow):
         for r in range(self.browser.rowCount()):
             row = " ".join(self.browser.item(r, k).text().lower() for k in range(self.browser.columnCount()))
             self.browser.setRowHidden(r, not all(w in row for w in words))
+
+    def _corner_analysis(self, session):
+        """The session's corners and per-lap corner figures, for the corner table
+        under the overlaid laps and the zone marks on the map."""
+        try:
+            result = corner_engine.analyse(session)
+            corners, metrics, reason = result["corners"], result["metrics"], ""
+        except (ValueError, KeyError) as e:
+            corners, metrics, reason = None, None, f"No corner analysis for this session: {e}"
+        self.compare.set_corner_data(corners, metrics, reason)
+        self.map.set_corners(corners)
 
     # ── measures and laps ─────────────────────────────────────────────────────
 

@@ -43,17 +43,32 @@ def gg_envelope(lat, lon, bins: int = 36, quantile: float = 0.98) -> pd.DataFram
     return pd.DataFrame(rows)
 
 
+HELD_S = 0.25                 # headline peaks are held this long (rolling median), so a kerb strike cannot set them
+
+
 def gg_summary(session, laps=None) -> dict:
-    """Headline G-G numbers against the vehicle's reference envelope."""
+    """Headline G-G numbers against the vehicle's reference envelope. The peaks
+    are held values — the highest acceleration kept up for a quarter of a second,
+    from the measured accelerometer where there is one — with the single highest
+    samples alongside as *_instant_g."""
     lat, lon = _lat_lon(session, laps)
     combined = np.hypot(lat, lon)
     util = combined / session.vehicle.grip_limit_g
+    window = max(int(round(HELD_S * session.rate_hz)), 1)
+    held = lambda x: pd.Series(x).rolling(window, center=True, min_periods=1).median().to_numpy()
+    frame = session.frame()
+    if laps is not None:
+        frame = frame[frame["lap"].isin(laps)]
+    measured = frame["acc_long"].to_numpy(float) if "acc_long" in frame and frame["acc_long"].notna().any() else lon
+    hl, hm = held(lat), held(measured)
     return {
         "samples": int(len(lat)),
-        "peak_lat_g": float(np.nanmax(np.abs(lat))),
-        "peak_brake_g": float(-np.nanmin(lon)),
-        "peak_drive_g": float(np.nanmax(lon)),
-        "peak_combined_g": float(np.nanmax(combined)),
+        "peak_lat_g": float(np.nanmax(np.abs(hl))),
+        "peak_brake_g": float(-np.nanmin(hm)),
+        "peak_drive_g": float(np.nanmax(hm)),
+        "peak_combined_g": float(np.nanmax(np.hypot(hl, held(lon)))),
+        "peak_lat_instant_g": float(np.nanmax(np.abs(lat))),
+        "peak_brake_instant_g": float(-np.nanmin(lon)),
         "mean_util": float(np.nanmean(util)),
         "frac_above_75": float(np.nanmean(util > 0.75)),
         "frac_above_90": float(np.nanmean(util > 0.90)),

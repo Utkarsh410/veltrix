@@ -5564,10 +5564,12 @@
  },
  "gg": {
   "samples": 4848,
-  "peak_lat_g": 1.833741081,
-  "peak_brake_g": 1.833159376,
-  "peak_drive_g": 0.748955299,
-  "peak_combined_g": 1.854066588,
+  "peak_lat_g": 1.76687054,
+  "peak_brake_g": 1.784811417,
+  "peak_drive_g": 0.73567788,
+  "peak_combined_g": 1.824064885,
+  "peak_lat_instant_g": 1.833741081,
+  "peak_brake_instant_g": 1.833159376,
   "mean_util": 0.458166905,
   "frac_above_75": 0.236386139,
   "frac_above_90": 0.003506601

@@ -350,6 +350,10 @@ def corner_metrics(session, corners: pd.DataFrame, laps=None, step: float | None
       brake_before_m  the braking point as a driver sees it: metres before turn-in, the
                       distance a marker board counts down to. Positive is before the corner;
                       larger is earlier
+      brake_release_m where that braking phase ends (the brake fully off, or trail-braking ending)
+      release_after_turn_in_m   the same, metres after turn-in (negative: released before turning in)
+      apex_ref_m      the corner's apex: one fixed point, the typical lap's slowest point
+      throttle_after_apex_m     where throttle came back above 20%, metres after that apex
       peak_brake_g    hardest deceleration in that braking phase, sustained over PEAK_G_SAMPLES
                       grid samples; from the measured longitudinal g when the file has it,
                       otherwise from d(speed)/dt
@@ -402,7 +406,9 @@ def corner_metrics(session, corners: pd.DataFrame, laps=None, step: float | None
                    "zone_time_s": (lap_time if last else t[z1]) - (0.0 if n == 0 else t[z0]),
                    "corner_time_s": t[c1] - t[c0],
                    "entry_speed": v[c0], "min_speed": v[apex], "exit_speed": v[c1],
-                   "apex_m": grid[apex], "brake_m": np.nan, "turn_in_m": turn_in[c.corner], "brake_before_m": np.nan, "peak_brake_g": np.nan,
+                   "apex_m": grid[apex], "brake_m": np.nan, "turn_in_m": turn_in[c.corner], "brake_before_m": np.nan,
+                   "brake_release_m": np.nan, "release_after_turn_in_m": np.nan, "apex_ref_m": float(c.apex_m),
+                   "throttle_after_apex_m": np.nan, "peak_brake_g": np.nan,
                    "throttle_on_m": np.nan, "full_throttle_m": np.nan, "min_throttle": np.nan,
                    "peak_lat_g": np.nan}
             if braking is not None:
@@ -411,6 +417,8 @@ def corner_metrics(session, corners: pd.DataFrame, laps=None, step: float | None
                     start, end = phase
                     rec["brake_m"] = grid[start]
                     rec["brake_before_m"] = float(turn_in[c.corner] - grid[start])
+                    rec["brake_release_m"] = float(grid[end])
+                    rec["release_after_turn_in_m"] = float(grid[end] - turn_in[c.corner])
                     if lon_peak is not None:
                         rec["peak_brake_g"] = float(np.nanmax(lon_peak[start:end + 1]))
             if thr is not None:
@@ -419,6 +427,8 @@ def corner_metrics(session, corners: pd.DataFrame, laps=None, step: float | None
                 on = np.flatnonzero(after >= THROTTLE_ON)
                 if len(on):
                     rec["throttle_on_m"] = grid[apex + on[0]]
+                    if rec["min_throttle"] < THROTTLE_FULL:     # a corner taken flat has no throttle pick-up
+                        rec["throttle_after_apex_m"] = float(grid[apex + on[0]] - c.apex_m)
                 full = np.flatnonzero(after >= THROTTLE_FULL)
                 if len(full):
                     rec["full_throttle_m"] = grid[apex + full[0]]
@@ -510,6 +520,67 @@ def compare_corners(metrics: pd.DataFrame, ref_lap, lap) -> pd.DataFrame:
     })
     out["finding"] = [explain(r) for r in out.to_dict("records")]
     return out
+
+
+def relative(metres: float, point: str) -> str:
+    """A distance from a fixed point of the corner, as a driver would say it:
+    "12 m after the apex", "5 m before turn-in", "at the apex". point carries its
+    own article: "the apex", "turn-in"."""
+    if not np.isfinite(metres):
+        return "—"
+    if abs(metres) < 0.5:
+        return f"at {point}"
+    return f"{abs(metres):.0f} m {'after' if metres > 0 else 'before'} {point}"
+
+
+PASS_FIELDS = (    # (column, label, unit, +ve difference means)
+    ("zone_time_s", "Time in the zone", "s", "slower"),
+    ("brake_before_m", "Braking point", "m before turn-in", "braked earlier"),
+    ("release_after_turn_in_m", "Brake release", "m after turn-in", "released later"),
+    ("min_speed", "Minimum speed", "km/h", "faster"),
+    ("throttle_after_apex_m", "Throttle on", "m after the apex", "later on throttle"),
+    ("exit_speed", "Exit speed", "km/h", "faster"),
+)
+
+
+def pass_comparison(metrics: pd.DataFrame, corners: pd.DataFrame, ref_lap, lap) -> pd.DataFrame:
+    """One lap's pass through every corner set against another's, with the fixed
+    corner references a driver can find on track. One row per corner:
+
+      corner, name, basis ("circuit file" / "inferred"), kind, direction
+      ref_<field>, lap_<field>, d_<field> (lap − reference) for every PASS_FIELDS column
+      ref_text / lap_text   {field: words}: "72 m before the corner", "15 m after the apex", …
+      finding               what in the data goes with the time difference"""
+    a = metrics[metrics["lap"] == ref_lap].set_index("corner")
+    b = metrics[metrics["lap"] == lap].set_index("corner")
+    if a.empty or b.empty:
+        raise KeyError(f"Corner metrics are missing for lap {ref_lap if a.empty else lap}.")
+    info = corners.set_index("corner")
+    rows = []
+    for k in info.index:
+        if k not in a.index or k not in b.index:
+            continue
+        row = {"corner": k, "name": info.loc[k, "name"] if "name" in info else "",
+               "basis": info.loc[k, "basis"] if "basis" in info else "inferred",
+               "kind": info.loc[k, "kind"], "direction": info.loc[k, "direction"]}
+        for col, *_ in PASS_FIELDS:
+            x, y = float(a.loc[k, col]), float(b.loc[k, col])
+            row[f"ref_{col}"], row[f"lap_{col}"], row[f"d_{col}"] = x, y, y - x
+        def words(r):
+            braked = np.isfinite(r["brake_before_m"])
+            flat = np.isfinite(r["min_throttle"]) and r["min_throttle"] >= THROTTLE_FULL
+            return {"brake_before_m": before_corner(r["brake_before_m"]) if braked else "no braking",
+                    "release_after_turn_in_m": relative(r["release_after_turn_in_m"], "turn-in") if braked else "—",
+                    "throttle_after_apex_m": "flat out" if flat else relative(r["throttle_after_apex_m"], "the apex")}
+        row["ref_text"], row["lap_text"] = words(a.loc[k]), words(b.loc[k])
+        row["finding"] = explain({"d_time_s": row["d_zone_time_s"],
+                                  "d_entry_speed": float(b.loc[k, "entry_speed"] - a.loc[k, "entry_speed"]),
+                                  "d_brake_m": float(b.loc[k, "brake_m"] - a.loc[k, "brake_m"]),
+                                  "d_min_speed": row["d_min_speed"],
+                                  "d_throttle_on_m": float(b.loc[k, "throttle_on_m"] - a.loc[k, "throttle_on_m"]),
+                                  "d_exit_speed": row["d_exit_speed"]})
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def analyse(session, laps=None) -> dict:

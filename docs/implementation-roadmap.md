@@ -356,8 +356,21 @@ P0, done:
   "N balance-incident candidates inferred from the steering … — K confirmed by a simulator record"; HTML data
   tab has a Status column, records first.
 
-Next: P1 (per-corner best-vs-comparison view with braking point, release, minimum speed, throttle-on and
-exit speed; zone boundaries on the track map; inferred vs official shown), then P2, P3.
+P1, done (the user chose "table under the charts"):
+- Engine: `corner_metrics` adds `brake_release_m`, `release_after_turn_in_m`, `apex_ref_m`,
+  `throttle_after_apex_m` (NaN for a corner taken flat); `corners.pass_comparison()` (one lap against another,
+  corner by corner, with `basis` and driver-readable words) and `corners.relative()`.
+- App: `CompareView` corner table under the overlaid charts (splitter; keeps its share of the height; hidden
+  with fewer than two laps; "Against" picks the comparison lap); a row click zooms the charts to the zone, puts
+  the cursor on the apex and lights the zone on the map (`MapDock.set_corners` / `highlight`: zone-start ticks,
+  apex labels, "T5 ?" for inferred). Corner analysis runs when a session opens (`MainWindow._corner_analysis`).
+- HTML report: corner table shows the same fields lap → lap with a basis note; map draws zone ticks and "?"
+  on inferred corners. Headline peaks are held values (`gg.gg_summary`: peak_*_g held 0.25 s, measured
+  accelerometer for braking; *_instant_g beside) — the Spa tiles read 3.23 g / 1.74 g before.
+- Key strips above charts are a fixed 18 px (`chart_layout.KEY_HEIGHT`).
+
+Next: P2 (lap potential: actual vs ideal-by-corner vs ideal-by-sector kept apart, which laps supplied each
+best corner, each corner's share of the gap, no composite lap presented as repeatable), then P3.
 
 ## Open items carried forward
 
