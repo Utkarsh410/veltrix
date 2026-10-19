@@ -70,7 +70,9 @@ class _Loader(QtCore.QThread):
                     self.done.emit(raw, self.path)
                 return
             names, units = self.mapping or (None, None)
-            session = build_session(raw, mapping=names, units=units or None)
+            from veltrix_engine.cars import CarLibrary
+            session = build_session(raw, mapping=names, units=units or None,
+                                    cars=CarLibrary(Path(self.data_folder or data_dir()) / "cars"))
             session.model.events, session.events_summary = detect_events(session, load_rules(self.data_folder)[0])
         except Exception as e:                     # anything a file can do wrong is a message, not a crash
             if not self.cancelled:
@@ -446,6 +448,8 @@ class MainWindow(SessionCharts, QtWidgets.QMainWindow):
         self._apply_reviews(session)
         self.events.show_model(session.model, session.events_summary)
         self.video.set_links(self.videos.load(session.raw.sha256), self.ws.cursor or 0.0)
+        self.maths.editor.vehicle = session.vehicle         # the built-in channels use this car's parameters
+        self.maths.editor._fill_builtin()
         failed = [n for n, r in self.maths.compute(session.model).items() if not r.ok]
         self._maths_seen = set(self.maths.mset.channels)
         self.map.set_session(session, self.ws.cursor if self.ws.cursor is not None else 0.0)
@@ -456,10 +460,13 @@ class MainWindow(SessionCharts, QtWidgets.QMainWindow):
         self._rebuild_charts()
         self.setWindowTitle(f"Veltrix Data — {source}")
         m = session.model.describe()
+        assumed = [c.id for c in session.model.channels("normalised") if c.provenance.unit_source == "assumed"]
         self.statusBar().showMessage(
             f"{source}: {m['channels']['normalised']} channels of {m['channels']['raw']} recognised, {m['laps']} laps, "
             f"{len(session.warnings())} import warning(s)." + (f" Not in this session: {', '.join(missing)}." if missing else "")
-            + (f" Maths channels not calculated: {', '.join(failed)}." if failed else ""))
+            + (f" Maths channels not calculated: {', '.join(failed)}." if failed else "")
+            + (f" Units assumed for {', '.join(assumed)} — File ▸ Open with mapping… to confirm them; the answer is "
+               "remembered for this logger." if assumed else ""))
 
     # ── events and annotations ────────────────────────────────────────────────
 

@@ -412,13 +412,18 @@ def _rolling(kind: str):
     return call
 
 
+CAP_SHARE = 0.4               # cap=1: a cutoff above this share of the sample rate is lowered to it
+
+
 def _filter(btype: str):
     def call(ev: Evaluator, node: Call) -> Series:
-        a = ev.args(node, ("x", "cutoff"), 2, {"order": 2.0, "zero_phase": 1.0})
+        a = ev.args(node, ("x", "cutoff"), 2, {"order": 2.0, "zero_phase": 1.0, "cap": 0.0, "uniform": 0.0})
         x = ev.signal(a["x"], node)
         cutoff = ev.number(a["cutoff"], node, "the cutoff (Hz)")
         order = int(ev.number(a["order"], node, "the order"))
         zero_phase = ev.number(a["zero_phase"], node, "zero_phase") != 0
+        cap = ev.number(a["cap"], node, "cap") != 0
+        uniform = ev.number(a["uniform"], node, "uniform") != 0
         if not 1 <= order <= 8:
             raise ev.fail(f"{node.name}(): the order must be between 1 and 8.", node)
         dt = np.diff(x.t)
@@ -427,25 +432,108 @@ def _filter(btype: str):
             raise ev.fail(f"{node.name}(): the channel has no usable timestamps.", node)
         step = float(np.median(dt))
         inside = dt[dt <= GAP_FACTOR * step]
-        if len(inside) and np.max(np.abs(inside - step)) > UNIFORM_TOLERANCE * step:
+        uneven = len(inside) and np.max(np.abs(inside - step)) > UNIFORM_TOLERANCE * step
+        if uneven and not uniform:
             raise ev.fail(f"{node.name}(): the channel is not uniformly sampled (its sample interval varies by more "
-                          f"than {UNIFORM_TOLERANCE:.0%}), and a filter needs a steady rate.", node)
+                          f"than {UNIFORM_TOLERANCE:.0%}), and a filter needs a steady rate. uniform=1 resamples each "
+                          "stretch onto an even grid, filters it there and reads the result back.", node)
         fs = 1.0 / step
+        capped = False
+        if cap and cutoff > CAP_SHARE * fs:
+            cutoff, capped = CAP_SHARE * fs, True          # as the engine does for a low-rate log
         if not 0 < cutoff < fs / 2:
-            raise ev.fail(f"{node.name}(): the cutoff must be between 0 and {fs / 2:g} Hz (half the {fs:g} Hz sample rate).", node)
+            raise ev.fail(f"{node.name}(): the cutoff must be between 0 and {fs / 2:g} Hz (half the {fs:g} Hz sample "
+                          f"rate). cap=1 lowers it to {CAP_SHARE:g} × the sample rate instead.", node)
         sos = signal.butter(order, cutoff, btype=btype, fs=fs, output="sos")
         pad = 3 * (2 * len(sos) + 1)
 
-        def run(t, v):
+        def plain(v):
             if zero_phase:
                 return signal.sosfiltfilt(sos, v)
             zi = signal.sosfilt_zi(sos) * v[0]
             return signal.sosfilt(sos, v, zi=zi)[0]
+
+        def run(t, v):
+            if not uneven:
+                return plain(v)
+            grid = np.arange(t[0], t[-1] + step / 2, step)            # an even grid at the median step
+            if len(grid) <= pad + 1:
+                return np.full(len(v), np.nan)
+            return np.interp(t, grid, plain(np.interp(grid, t, v)))
         out, _ = _per_segment(x, run, min_len=pad + 2)
         phase = "zero-phase (run forwards and backwards, no delay)" if zero_phase else "causal (run forwards only, delays the signal)"
-        note = f"Butterworth {btype}, order {order}, cutoff {cutoff:g} Hz at {fs:g} Hz, {phase}"
+        note = (f"Butterworth {btype}, order {order}, cutoff {cutoff:g} Hz at {fs:g} Hz, {phase}"
+                + (f"; cutoff capped at {CAP_SHARE:g} × the sample rate" if capped else "")
+                + ("; filtered on an even grid at the median step and read back on the channel's own timestamps"
+                   if uneven else ""))
         return Series(out, x.t, np.isfinite(out), x.unit, False, x.steps + [note])
     return call
+
+
+def _atan2(ev: Evaluator, node: Call) -> Series:
+    """atan2(y, x): the angle of the vector (x, y), in rad. y and x must be the same kind of quantity."""
+    a = ev.args(node, ("y", "x"), 2)
+    y, x = ev.pair(a["y"], a["x"])
+    try:
+        _, scale, offset = U.same_kind(y.unit, x.unit, "take the angle between")
+    except U.UnitError as e:
+        raise ev.fail(str(e), node) from None
+    out = np.arctan2(np.asarray(y.v, float), np.asarray(x.v, float) * scale + offset)
+    return ev._combine(y, x, out, U.parse_unit("rad"))
+
+
+def _hypot(ev: Evaluator, node: Call) -> Series:
+    """hypot(a, b): sqrt(a² + b²), in the unit of a."""
+    a = ev.args(node, ("a", "b"), 2)
+    x, y = ev.pair(a["a"], a["b"])
+    try:
+        unit, scale, offset = U.same_kind(x.unit, y.unit, "combine")
+    except U.UnitError as e:
+        raise ev.fail(str(e), node) from None
+    return ev._combine(x, y, np.hypot(np.asarray(x.v, float), np.asarray(y.v, float) * scale + offset), unit)
+
+
+def _when(ev: Evaluator, node: Call) -> Series:
+    """when(condition, x): x where the condition holds, invalid elsewhere — not zero, not held."""
+    a = ev.args(node, ("condition", "x"), 2)
+    c, x = ev.pair(a["condition"], a["x"])
+    if x.scalar and c.scalar:
+        return x if c.v else Series(np.nan, None, None, x.unit, False, x.steps)
+    t = c.t if not c.scalar else x.t
+    cv = np.broadcast_to(np.asarray(c.v, float), (len(t),))
+    xv = np.broadcast_to(np.asarray(x.v, float), (len(t),))
+    valid = (cv != 0) & np.isfinite(xv) & np.isfinite(cv)
+    for s_ in (c, x):
+        if not s_.scalar:
+            valid &= s_.mask()
+    return Series(np.where(valid, xv, np.nan), t, valid, x.unit, x.discrete, c.steps + [s_ for s_ in x.steps if s_ not in c.steps])
+
+
+def _rolling_median(ev: Evaluator, node: Call) -> Series:
+    """rolling_median(x, seconds, edges=false): the median over a centred window — what a signal holds,
+    without one-sample jolts. edges=true keeps the ends of each stretch with a shorter window."""
+    a = ev.args(node, ("x", "window"), 2, {"edges": 0.0})
+    x = ev.signal(a["x"], node)
+    seconds = ev.number(a["window"], node, "the window (seconds)")
+    n = _window_samples(ev, node, x, seconds)
+    edges = ev.number(a["edges"], node, "edges") != 0
+
+    def roll(t, v):
+        return pd.Series(v).rolling(n, center=True, min_periods=1 if edges else n).median().to_numpy()
+    out, _ = _per_segment(x, roll, min_len=1 if edges else n)
+    note = f"rolling median over {n} samples ({seconds:g} s), centred" + ("" if edges else "; the ends of each stretch are invalid")
+    return Series(out, x.t, np.isfinite(out), x.unit, False, x.steps + [note])
+
+
+def _since_change(ev: Evaluator, node: Call) -> Series:
+    """since_change(x): seconds since x last took a new value — since_change(lap) is the time into the lap."""
+    a = ev.args(node, ("x",), 1)
+    x = ev.signal(a["x"], node)
+    v, t = np.asarray(x.v, float), np.asarray(x.t, float)
+    change = np.r_[True, v[1:] != v[:-1]]
+    start = np.maximum.accumulate(np.where(change, np.arange(len(v)), 0))
+    out = t - t[start]
+    return Series(out, x.t, x.mask().copy(), U.parse_unit("s"), False, x.steps + ["seconds since the value last changed"])
 
 
 def _peak_detect(ev: Evaluator, node: Call) -> Series:
@@ -491,6 +579,11 @@ FUNCTIONS = {
     "lowpass": _filter("lowpass"),
     "highpass": _filter("highpass"),
     "peak_detect": _peak_detect,
+    "atan2": _atan2,
+    "hypot": _hypot,
+    "when": _when,
+    "rolling_median": _rolling_median,
+    "since_change": _since_change,
 }
 
 REFERENCE = {
@@ -506,7 +599,14 @@ REFERENCE = {
     "integrate(x)": "running integral over time; nothing is added across a gap",
     "moving_average(x, seconds)": "centred mean over a window; samples without a full window are invalid",
     "rolling_min / rolling_max / rolling_std (x, seconds)": "the same for minimum, maximum and standard deviation",
-    "lowpass(x, cutoff, order=2, zero_phase=true)": "Butterworth low-pass, cutoff in Hz; zero_phase=false is causal",
+    "lowpass(x, cutoff, order=2, zero_phase=true, cap=false, uniform=false)": "Butterworth low-pass, cutoff in Hz; "
+        "zero_phase=false is causal; cap=1 lowers a cutoff too high for the sample rate to 0.4 × the rate; uniform=1 "
+        "filters an unevenly sampled channel on an even grid",
     "highpass(x, cutoff, order=2, zero_phase=true)": "Butterworth high-pass",
     "peak_detect(x, min_height=, min_distance=, prominence=)": "1 at each local maximum, 0 elsewhere; min_distance in seconds",
+    "atan2(y, x)": "the angle of the vector (x, y) in rad; y and x the same kind of quantity",
+    "hypot(a, b)": "sqrt(a² + b²), in the unit of a",
+    "when(condition, x)": "x where the condition holds, invalid elsewhere (not zero)",
+    "rolling_median(x, seconds, edges=false)": "centred median over a window: what a signal holds, without one-sample jolts",
+    "since_change(x)": "seconds since x last changed value — since_change(lap) is the time into the lap",
 }

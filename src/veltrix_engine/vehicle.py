@@ -30,10 +30,11 @@ class VehicleParams:
 
     def known(self, name: str) -> bool:
         """True when the value is this car's, not the placeholder default."""
-        return self.source.get(name) in ("user", "file")
+        return self.source.get(name) in ("user", "file", "library")
 
     def origin(self, name: str) -> str:
-        return {"user": "stated at import", "file": "from the file"}.get(self.source.get(name), "default, not this car's")
+        return {"user": "stated at import", "file": "from the file", "library": "from the car library"}.get(
+            self.source.get(name), "default, not this car's")
 
     def to_dict(self) -> dict:
         return {f.name: getattr(self, f.name) for f in fields(self) if f.name != "source"} | {"source": dict(self.source)}

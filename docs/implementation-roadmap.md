@@ -428,6 +428,33 @@ All four priorities (P0–P3) of the user's improvement list are done.
   missing channels; `logs.py` (rotating log in the data folder, set up by the app and the CLI);
   `veltrix_app/crash.py` (local crash report, nothing sent).
 
+## Wave B, phase 6 (maths engine) — what was built, 2026-10-19
+
+- `maths/builtin.py`: `standard_set(vehicle)` — acc_long_calc, steering_rate, acc_lat_calc, yaw_rate_est,
+  oversteer_metric, acc_lat_sustained, body_slip, llt_front/rear, lltd_front, grip_util as formulas with car
+  parameters; `NOT_A_FORMULA` (acc_lat_rebuilt). Matches `derived.py` to ≤0.04% on evenly sampled logs (golden
+  sessions; Spa `.ibt` exact); on multi-rate / uneven logs r ≥ 0.99 but differs in detail (Hungaroring `.ld`,
+  Monza) because the engine works on the resampled view. Engine numbers stay authoritative for now.
+- `maths/evaluate.py`: `atan2`, `hypot`, `when`, `rolling_median`, `since_change`; `lowpass`/`highpass`
+  options `cap=1` (cutoff ≤ 0.4 × rate) and `uniform=1` (filter an uneven clock on an even grid).
+- `MathSet.subset`, `MathSet.merge` (rename / replace / keep; dependants follow a rename; parameters never
+  overwritten); `MathChannel.history`; format 2 with migration from 1; `MathSet.save` refuses a newer file.
+- Editor: Built-in list (read-only, "Copy to my channels" with its car parameters), Import…, Export…; the
+  window passes the session's car to it.
+- Tests: `tests/test_maths_builtin.py`.
+
+## Wave B, phase 5 (channel model) — what was built, 2026-10-19
+
+- `cars.py`: `CarLibrary` (`<data>/cars/<key>.json`, versioned; match by name or alias ignoring case and
+  punctuation; `apply` fills parameters not stated or read from the file, source "library").
+  `VehicleParams.known/origin` treat "library" as the car's own. `build_session(..., cars=)`, notes say what
+  came from the library or that the car is missing. CLI `_load` and the app's loader pass the data folder's
+  library; `veltrix car list|show|set|remove`. Tests: `tests/test_cars.py`.
+- Window status line: units assumed → "File ▸ Open with mapping… to confirm them; remembered for this
+  logger" (the mapping dialog already saves typed units into the profile).
+- Waiting on the user: circuit data (official numbers, names, boards), other simulators' files, a reference
+  screenshot for an in-app car-settings screen; phase 7 views wait for references too.
+
 ## Open items carried forward
 
 | Item | Rule | Planned in |

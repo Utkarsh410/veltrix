@@ -89,12 +89,53 @@ name that fits more than one channel is refused, not guessed.
 | `lowpass(x, cutoff, order=2, zero_phase=true)` | Butterworth, cutoff in Hz |
 | `highpass(x, cutoff, order=2, zero_phase=true)` | Butterworth |
 | `peak_detect(x, min_height=, min_distance=, prominence=)` | 1 at local maxima; `min_distance` in seconds |
+| `atan2(y, x)` | angle of the vector (x, y) in rad; y and x the same kind of quantity |
+| `hypot(a, b)` | sqrt(a² + b²), in the unit of a |
+| `when(condition, x)` | x where the condition holds, **invalid** elsewhere (not zero, not held) |
+| `rolling_median(x, seconds, edges=false)` | centred median: what a signal holds, without one-sample jolts |
+| `since_change(x)` | seconds since x last changed — `since_change(lap)` is the time into the lap |
 
 Filters are Butterworth only. `zero_phase=true` runs the filter forwards and
 backwards (no delay, not realisable in real time); `zero_phase=false` is
 causal and delays the signal. Type, order, cutoff, sample rate and phase are
 written into the result's provenance. A filter refuses a channel whose sample
-interval varies by more than 2%.
+interval varies by more than 2% unless `uniform=1` is given: each stretch is
+then resampled onto an even grid at the median step, filtered there and read
+back on the channel's own timestamps. `cap=1` lowers a cutoff too high for the
+sample rate to 0.4 × the rate, as the engine does for a low-rate log. Both are
+written into the provenance.
+
+## Built-in channels: how the engine derives its own
+
+`veltrix_engine.maths.builtin.standard_set(vehicle)` writes every channel the
+engine derives (`derived.py`) as a maths channel, with the car's parameters as
+`$steer_ratio`, `$wheelbase_m`, `$wheel_rate_front_N_mm`,
+`$wheel_rate_rear_N_mm` and `$grip_limit_g`. The editor lists them under
+**Built-in**; **Copy to my channels** puts one in the form under its own
+name, and saved, a maths channel of that name replaces the engine's channel
+everywhere the analysis reads it.
+
+On an evenly sampled log the formulas give the engine's numbers (within the
+0.04% between the engine's g = 9.81 and the standard 9.80665; tested on the
+golden sessions; the Spa `.ibt` matches exactly). On a log whose channels are
+each at their own rate, or on an uneven clock, the formulas work on the
+channels' own samples while the engine works on its resampled analysis view:
+they correlate at 0.99 or better but differ in detail (up to 10% on the
+oversteer metric on the Hungaroring `.ld`). The engine's numbers are the ones
+the report uses until the move to native timestamps (development plan, phases
+5 and 19) — the real-session regression check is there to review that move.
+`acc_lat_rebuilt` (lateral g rebuilt from damper roll by a fit) and the bridging
+of speed jumps in `acc_long_calc` are not formulas and are listed as such.
+
+## Sharing
+
+`MathSet.subset(names)` takes channels with every maths channel they are built
+on and the parameters they use — a set that computes on its own.
+`MathSet.merge(other, on_clash="rename" | "replace" | "keep")` brings another
+set in: a taken name is renamed (`CombinedG_2`, and the imported channels that
+use it follow), replaced (the old formula kept in the history) or left out; a
+parameter with a different value is never overwritten, only reported. The
+editor's **Import…** and **Export…** do this.
 
 ## Sampling
 
@@ -137,7 +178,9 @@ number: 50 % is the number 50.
 itself is reported with the loop (`A → B → C → A`). A missing input fails only
 the channels that need it, each with its own message. Changing a formula or
 unit raises that channel's version, which is stored in the result's
-provenance. A channel is recomputed only when its formula, its parameters or
+provenance, and keeps the earlier formula in the channel's `history`
+({version, formula, unit, at}). Maths files are format 2 since history was
+added; a format-1 file opens and is brought up to date. A channel is recomputed only when its formula, its parameters or
 its inputs changed.
 
 ## Persistence
@@ -155,7 +198,5 @@ when nothing has changed takes 5 ms.
 
 ## Not built yet
 
-Maths channels in a report made from the command line (they appear in reports
-of sessions that carry them), expressing the engine's own derived channels as
-maths channels, string options (the filter type is fixed to Butterworth), and
+String options (the filter type is fixed to Butterworth), and
 an undo history in the editor.

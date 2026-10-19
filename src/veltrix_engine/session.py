@@ -117,7 +117,7 @@ def load_session(path: str | Path, dbc=None, channels=None, progress=None, cance
 
 def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: dict | None = None,
                   rate_hz: float | None = None, flip: tuple = (),
-                  start_finish_index: int | None = None, units: dict | None = None) -> Session:
+                  start_finish_index: int | None = None, units: dict | None = None, cars=None) -> Session:
     """Normalise a RawTable into a Session.
 
     mapping: {channel id: source column} to override the automatic mapping
@@ -147,6 +147,15 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
             taken.append(name)
     if taken:
         note("info", "Car parameters read from the file: " + ", ".join(f"{n} {getattr(vehicle, n):g}" for n in taken) + ".")
+    if cars is not None:                         # a CarLibrary: what is known about this car, where nothing better is
+        name = str(raw.info.get("Vehicle", "")).strip()
+        library = cars.apply(vehicle, name)
+        if library:
+            note("info", f"Car parameters from the car library ({name}): "
+                         + ", ".join(f"{n} {getattr(vehicle, n):g}" for n in library) + ".")
+        elif name and cars.get(name) is None:
+            note("info", f"{name} is not in the car library, so placeholder values stand in for what the file does "
+                         "not give (wheelbase, steering ratio, wheel rates…). Add it once: veltrix car set.")
 
     # ── map ────────────────────────────────────────────────────────────────
     mapped = auto_map(raw.data.columns)

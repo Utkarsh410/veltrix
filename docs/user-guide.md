@@ -276,6 +276,22 @@ Braking points in the engineering report are given the way a driver reads them o
 corner" — or "into the corner" when the brakes go on after the car has started to turn. Turn-in is one
 fixed point per corner, taken from a typical lap.
 
+## The car library
+
+Several figures need the car's own numbers — wheelbase, steering ratio, mass,
+weight distribution, wheel rates. Enter them once per car:
+
+    veltrix car set "Toyota GR86" --wheelbase 2.575 --steer-ratio 13.5 --alias GR86
+    veltrix car show "Toyota GR86"
+    veltrix car list
+
+Every session whose file names that car (or an alias) then uses them, in the app
+and in reports. A value given when importing, or read from the file itself (an
+iRacing setup gives the mass and the static front weight), comes first; the
+library fills in the rest; a value known from neither is a placeholder, and the
+report says so rather than quoting it as the car's. The import's notes say
+which values came from where.
+
 ## When something goes wrong
 
 A file that cannot be read gives a message naming the file and what is wrong

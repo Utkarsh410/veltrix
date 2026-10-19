@@ -62,8 +62,44 @@ def _load(args):
         units = dict(item.split("=", 1) for item in (args.unit or ()))
     except ValueError:
         raise ValueError("--unit expects COLUMN=UNIT, for example --unit G_LAT=g")
+    cars = None
+    if not getattr(args, "no_app_data", False):
+        from .cars import CarLibrary
+        from .user_data import data_dir
+        cars = CarLibrary(Path(getattr(args, "app_data", None) or data_dir()) / "cars")
     return load_session(args.file, vehicle=vehicle, flip=tuple(args.flip or ()), rate_hz=args.rate,
-                        units=units, dbc=args.dbc or None)
+                        units=units, dbc=args.dbc or None, cars=cars)
+
+
+def car(args) -> int:
+    from .cars import PARAMETERS, CarLibrary
+    from .user_data import data_dir
+    library = CarLibrary(Path(args.app_data or data_dir()) / "cars")
+    if args.action == "list":
+        names = library.names()
+        print("\n".join(names) if names else "The car library is empty. Add a car: veltrix car set NAME --wheelbase …")
+        return 0
+    if not args.name:
+        raise ValueError(f"veltrix car {args.action} needs the car's name.")
+    if args.action == "remove":
+        print(f"Removed {args.name}." if library.remove(args.name) else f"{args.name} is not in the car library.")
+        return 0
+    if args.action == "set":
+        given = {p: getattr(args, p) for p in PARAMETERS if getattr(args, p, None) is not None}
+        if not given and not args.alias:
+            raise ValueError("Give at least one parameter, e.g. --wheelbase 2.575, or an --alias.")
+        print(f"Saved to {library.save(args.name, given, args.alias, args.note)}")
+    entry = library.get(args.name)
+    if entry is None:
+        print(f"{args.name} is not in the car library.")
+        return 1
+    print(entry["name"] + (f"  (also: {', '.join(entry['aliases'])})" if entry["aliases"] else ""))
+    for p in PARAMETERS:
+        if p in entry["parameters"]:
+            print(f"  {p:<24} {entry['parameters'][p]:g}")
+    if entry.get("note"):
+        print(f"  note: {entry['note']}")
+    return 0
 
 
 def file_stem(path) -> str:
@@ -509,6 +545,19 @@ def main(argv=None) -> int:
     c.add_argument("--name", help="circuit name (default: the venue in the file)")
     c.add_argument("--force", action="store_true", help="replace an existing circuit file")
     c.set_defaults(func=circuit)
+
+    k = sub.add_parser("car", help="the car library: a car's parameters, entered once, used for every session of it")
+    k.add_argument("action", choices=("list", "show", "set", "remove"))
+    k.add_argument("name", nargs="?", help='the car, as the files name it, e.g. "Toyota GR86"')
+    k.add_argument("--alias", nargs="*", default=[], help="other names files give the same car")
+    k.add_argument("--note", default="", help="where the numbers come from")
+    k.add_argument("--app-data", metavar="DIR", help="use this data folder instead of the app's own")
+    for flag, dest in (("--wheelbase", "wheelbase_m"), ("--track-front", "track_front_m"), ("--track-rear", "track_rear_m"),
+                       ("--mass", "mass_kg"), ("--cg-height", "cg_height_m"), ("--front-weight", "front_weight_dist"),
+                       ("--steer-ratio", "steer_ratio"), ("--wheel-rate-front", "wheel_rate_front_N_mm"),
+                       ("--wheel-rate-rear", "wheel_rate_rear_N_mm"), ("--grip-limit", "grip_limit_g")):
+        k.add_argument(flag, dest=dest, type=float)
+    k.set_defaults(func=car)
 
     p = sub.add_parser("inspect", help="load a telemetry file and print what the engine makes of it")
     import_options(p)

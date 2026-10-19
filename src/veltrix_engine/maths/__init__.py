@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -40,7 +42,16 @@ from .parser import FormulaError, parse, references
 __all__ = ["FUNCTIONS", "REFERENCE", "FormulaError", "MathChannel", "MathSet", "Result", "check", "compute",
            "dependencies", "order", "on_view", "preview"]
 
-SET_VERSION = 1
+SET_VERSION = 2               # 2: each channel keeps the history of its earlier formulas
+
+
+def _to_v2(data: dict) -> dict:
+    """Format 1 had no history: every channel starts with an empty one."""
+    data["channels"] = [{**c, "history": []} for c in data.get("channels", [])]
+    return data
+
+
+SET_MIGRATIONS = {1: _to_v2}
 ENGINE = "maths 1"
 
 
@@ -53,6 +64,7 @@ class MathChannel:
     category: str = "maths"
     estimate: bool = False         # an estimate of something not measured: flagged on the channel
     version: int = 1               # goes up each time the formula or unit is changed
+    history: list = field(default_factory=list)   # earlier versions: [{version, formula, unit, at}], oldest first
 
 
 @dataclass
@@ -79,9 +91,78 @@ class MathSet:
         parse(formula)
         old = self.channels.get(name)
         changed = old is not None and (old.formula, old.unit) != (formula, unit)
+        history = list(old.history) if old else []
+        if changed:
+            history.append({"version": old.version, "formula": old.formula, "unit": old.unit,
+                            "at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         self.channels[name] = MathChannel(name, formula, unit, description, category, estimate,
-                                          (old.version + 1) if changed else (old.version if old else 1))
+                                          (old.version + 1) if changed else (old.version if old else 1), history)
         return self.channels[name]
+
+    def subset(self, names: list) -> "MathSet":
+        """These channels, every maths channel they are built on, and the parameters they use —
+        a set that computes on its own, for sharing."""
+        graph = dependencies(self)
+        keep, todo = [], list(names)
+        while todo:
+            n = todo.pop()
+            if n in keep or n not in self.channels:
+                continue
+            keep.append(n)
+            todo += [u for u in graph[n]["uses_maths"] if u in self.channels]
+        out = MathSet()
+        for n in self.channels:                  # in this set's own order
+            if n in keep:
+                out.channels[n] = self.channels[n]
+        used = {p for n in keep for p in references(parse(self.channels[n].formula))[1]}
+        out.parameters = {k: v for k, v in self.parameters.items() if k in used}
+        return out
+
+    def merge(self, other: "MathSet", on_clash: str = "rename") -> dict:
+        """Bring another set's channels and parameters into this one. A channel
+        whose name is taken is renamed ("rename", e.g. CombinedG_2 — and the
+        imported channels that use it follow), replaces this set's ("replace",
+        its old formula kept in the history), or is left out ("keep"). A
+        parameter with a different value is never overwritten; it is reported.
+        Returns what happened: {added, renamed: {old: new}, replaced, kept,
+        parameters_added, parameters_differ}."""
+        if on_clash not in ("rename", "replace", "keep"):
+            raise ValueError("on_clash is rename, replace or keep.")
+        report = {"added": [], "renamed": {}, "replaced": [], "kept": [], "parameters_added": [], "parameters_differ": []}
+        for k, v in other.parameters.items():
+            if k not in self.parameters:
+                self.parameters[k] = v
+                report["parameters_added"].append(k)
+            elif self.parameters[k] != v:
+                report["parameters_differ"].append(k)
+        names = {}
+        for n, c in other.channels.items():
+            if n in self.channels and self.channels[n].formula != c.formula:
+                if on_clash == "rename":
+                    k = 2
+                    while f"{n}_{k}" in self.channels or f"{n}_{k}" in other.channels:
+                        k += 1
+                    names[n] = f"{n}_{k}"
+                    report["renamed"][n] = names[n]
+                elif on_clash == "keep":
+                    report["kept"].append(n)
+                    continue
+                else:
+                    names[n] = n
+                    report["replaced"].append(n)
+            else:
+                names[n] = n
+                if n not in self.channels:
+                    report["added"].append(n)
+        for n, c in other.channels.items():
+            if n not in names:
+                continue
+            formula = c.formula
+            for old, new in names.items():           # imported channels refer to the renamed copies
+                if old != new:
+                    formula = re.sub(rf"(?<![\w$\[]){re.escape(old)}(?![\w])", new, formula)
+            self.add(names[n], formula, c.unit, c.description, c.category, c.estimate)
+        return report
 
     def remove(self, name: str) -> None:
         self.channels.pop(name, None)
@@ -93,7 +174,7 @@ class MathSet:
     @classmethod
     def from_dict(cls, data: dict) -> "MathSet":
         from ..versions import upgrade
-        data = upgrade("maths channel set", data, SET_VERSION)
+        data = upgrade("maths channel set", data, SET_VERSION, SET_MIGRATIONS)
         if data.get("version", 1) > SET_VERSION:
             raise ValueError("These maths channels were saved by a newer version of the engine.")
         out = cls()
@@ -103,7 +184,9 @@ class MathSet:
         return out
 
     def save(self, path: str | Path) -> Path:
+        from ..versions import refuse_overwrite
         path = Path(path)
+        refuse_overwrite(path, "maths channel set", SET_VERSION)
         path.write_text(json.dumps(self.to_dict(), indent=1), encoding="utf-8")
         return path
 

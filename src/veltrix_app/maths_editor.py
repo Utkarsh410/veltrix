@@ -29,6 +29,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from veltrix_engine import maths
 from veltrix_engine.display import decimate
 from veltrix_engine.maths import FormulaError, MathChannel, MathSet
+from veltrix_engine.maths.builtin import NOT_A_FORMULA, standard_set
 
 _WORD = re.compile(r"\$?[A-Za-z_][A-Za-z0-9_]*|\[[^\[\]]*\]|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
 _KEYWORDS = {"and", "or", "not", "in", "as", "true", "false"}
@@ -110,6 +111,19 @@ class MathsEditor(QtWidgets.QWidget):
         new.clicked.connect(self.new_channel)
         duplicate.clicked.connect(self.duplicate_channel)
         delete.clicked.connect(self.delete_channel)
+        importing, exporting = QtWidgets.QPushButton("Import…"), QtWidgets.QPushButton("Export…")
+        importing.setToolTip("Bring in channels from a maths file someone shared; clashing names are renamed")
+        exporting.setToolTip("Save the selected channel, with everything it is built on, to share it")
+        importing.clicked.connect(lambda: self.import_channels())
+        exporting.clicked.connect(lambda: self.export_channels())
+        # the channels the engine derives, as formulas: read them, or copy one to change it
+        self.builtin = QtWidgets.QListWidget()
+        self.builtin.setMaximumHeight(170)
+        self.builtin.currentTextChanged.connect(self._builtin_selected)
+        copy = QtWidgets.QPushButton("Copy to my channels")
+        copy.setToolTip("Put this built-in channel in the form under the same name. Saved, it replaces the "
+                        "engine's channel everywhere the analysis reads it.")
+        copy.clicked.connect(lambda: self.copy_builtin())
         left = QtWidgets.QWidget()
         lv = QtWidgets.QVBoxLayout(left)
         lv.setContentsMargins(0, 0, 0, 0)
@@ -119,6 +133,13 @@ class MathsEditor(QtWidgets.QWidget):
         for b in (new, duplicate, delete):
             row.addWidget(b)
         lv.addLayout(row)
+        share = QtWidgets.QHBoxLayout()
+        share.addWidget(importing)
+        share.addWidget(exporting)
+        lv.addLayout(share)
+        lv.addWidget(QtWidgets.QLabel("Built-in: how the engine derives its channels"))
+        lv.addWidget(self.builtin)
+        lv.addWidget(copy)
 
         # ── middle: the channel being edited ──────────────────────────────────
         self.name = QtWidgets.QLineEdit(placeholderText="Name, e.g. CombinedG")
@@ -255,6 +276,7 @@ class MathsEditor(QtWidgets.QWidget):
             widget.textChanged.connect(self._timer.start)
         self._fill_parameters()
         self._refresh_list()
+        self._fill_builtin()
         if self.load_error:
             self.status.setText(self.load_error)
 
@@ -283,6 +305,101 @@ class MathsEditor(QtWidgets.QWidget):
             return False
 
     # ── lists ─────────────────────────────────────────────────────────────────
+
+    # ── built-in channels and sharing ─────────────────────────────────────────
+
+    def _builtin_set(self) -> MathSet:
+        return standard_set(getattr(self, "vehicle", None))
+
+    def _fill_builtin(self):
+        self.builtin.blockSignals(True)
+        self.builtin.clear()
+        for name, c in self._builtin_set().channels.items():
+            item = QtWidgets.QListWidgetItem(name + ("  (yours replaces it)" if name in self.mset.channels else ""))
+            item.setData(QtCore.Qt.UserRole, name)
+            item.setToolTip(f"{c.description}\n{c.formula}")
+            self.builtin.addItem(item)
+        for name, why in NOT_A_FORMULA.items():
+            item = QtWidgets.QListWidgetItem(f"{name}  (not a formula)")
+            item.setData(QtCore.Qt.UserRole, None)
+            item.setToolTip(why)
+            item.setForeground(QtGui.QColor("#8A8794"))
+            self.builtin.addItem(item)
+        self.builtin.blockSignals(False)
+
+    def _builtin_selected(self, _text):
+        item = self.builtin.currentItem()
+        name = item.data(QtCore.Qt.UserRole) if item else None
+        if name is None:
+            if item is not None:
+                self.status.setText(f"{item.text()}: {item.toolTip()}")
+            return
+        c = self._builtin_set().channels[name]
+        self.status.setText(f"Built-in {name} = {c.formula}   ({c.description})")
+        self.status.setStyleSheet("")
+
+    def copy_builtin(self, name: str | None = None):
+        """Put a built-in channel in the form, under its own name, ready to change and save."""
+        if name is None:
+            item = self.builtin.currentItem()
+            name = item.data(QtCore.Qt.UserRole) if item else None
+        if name is None:
+            return
+        built = self._builtin_set()
+        c = built.channels[name]
+        for p, v in built.parameters.items():          # the car parameters it uses come with it
+            if p in c.formula and p not in self.mset.parameters:
+                self.mset.parameters[p] = v
+        self._fill_parameters()
+        self.new_channel()
+        self._loading = True
+        self.name.setText(name)
+        self.formula.setPlainText(c.formula)
+        self.description.setText(c.description + " (copied from the built-in; yours replaces it)")
+        self.category.setText("built-in, changed")
+        self._loading = False
+        self.validate()
+
+    def import_channels(self, path: str | None = None, on_clash: str = "rename") -> dict | None:
+        if path is None:
+            path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Import maths channels", "", "Maths channels (*.json)")
+            if not path:
+                return None
+        try:
+            report = self.mset.merge(MathSet.load(path), on_clash)
+        except (ValueError, KeyError, OSError) as e:
+            self.status.setText(f"✗ Could not import: {e}")
+            self.status.setStyleSheet("color: #C0392B;")
+            return None
+        self._write()
+        if self.model is not None:
+            self.results = maths.compute(self.model, self.mset)
+        self._refresh_list()
+        self._fill_parameters()
+        self._fill_channels()
+        self._fill_builtin()
+        self.changed.emit()
+        said = [f"{len(report['added'])} added"]
+        if report["renamed"]:
+            said.append("renamed " + ", ".join(f"{a} → {b}" for a, b in report["renamed"].items()))
+        if report["parameters_differ"]:
+            said.append("kept your value of " + ", ".join("$" + p for p in report["parameters_differ"]))
+        self.status.setText("Imported: " + "; ".join(said) + ".")
+        self.status.setStyleSheet("")
+        return report
+
+    def export_channels(self, path: str | None = None, names: list | None = None) -> Path | None:
+        names = names or ([self._editing] if self._editing else list(self.mset.channels))
+        if path is None:
+            path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export maths channels",
+                                                            f"{names[0] if len(names) == 1 else 'maths'}.json",
+                                                            "Maths channels (*.json)")
+            if not path:
+                return None
+        out = self.mset.subset(names).save(path)
+        self.status.setText(f"Exported {', '.join(names)} (with what it is built on) to {out}.")
+        self.status.setStyleSheet("")
+        return out
 
     def _refresh_list(self):
         current = self._editing or ""

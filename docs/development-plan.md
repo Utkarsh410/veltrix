@@ -112,6 +112,14 @@ project saved by the previous release opens unchanged.
 
 ### Phase 5 — Universal telemetry and channel model (Critical)
 
+**Status, 2026-10-19:** car library built (`cars.py`, `veltrix car`, used by the
+app and the command line; priority stated > file > library > placeholder);
+plain Open now points to Open with mapping when a unit was assumed (the answer
+is remembered in the logger's profile). **Waiting on input:** official corner
+numbers, names and marker-board positions for Spa (and each circuit used);
+a real session from rFactor 2 / Le Mans Ultimate, Automobilista 2 and an F1 game
+for their profiles; a reference screenshot for a car-settings screen in the app.
+
 **There:** canonical schema, mapping profiles with priority (metadata >
 verified profile > plausibility > user), units with provenance, model layers.
 
@@ -132,6 +140,13 @@ unit; car and circuit come from the library or the file; the report states no
 placeholder value as the car's.
 
 ### Phase 6 — Maths-channel engine (Critical)
+
+**Status, 2026-10-19:** built — built-in set of the engine's derived channels
+(matching the engine on evenly sampled logs), five new functions, filters that
+cap a cutoff and handle an uneven clock, import / export with dependencies and
+clash handling, formula history (maths format 2). **Open:** making the formulas
+the engine's own source on multi-rate logs, which moves numbers there — with
+the native-timestamp work in phases 5 and 19.
 
 **There:** parser, units, validity, gap-aware functions, editor with live
 validation, preview and dependency view.
