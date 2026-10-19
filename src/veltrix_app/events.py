@@ -46,9 +46,10 @@ def detect_events(session, rules=None, fit: bool = True) -> tuple[list, str]:
         lines.append("Thresholds fitted to this session: " + " ".join(fitted["changes"]))
     try:
         result = handling.analyse(session)
-        balance = events_from_incidents(result["events"], session.laps, RULE_VERSION,
-                                        session.model.get("lap_distance") if session.model.has("lap_distance") else None)
         model = result["model"]
+        balance = events_from_incidents(result["events"], session.laps, RULE_VERSION,
+                                        session.model.get("lap_distance") if session.model.has("lap_distance") else None,
+                                        thresholds=steering_limits(model))
         lines.append(f"{len(balance)} possible balance incident(s): steering differing from this car's own norm by at least "
                      f"{model['threshold_deg']:.0f} deg for {handling.MIN_DURATION_S:g} s, over {model['flying_laps']} flying laps.")
     except (ValueError, KeyError) as e:
@@ -66,20 +67,42 @@ def detect_events(session, rules=None, fit: bool = True) -> tuple[list, str]:
     return events, " ".join([head] + lines)
 
 
+def steering_limits(model: dict) -> dict:
+    """The limits the steering model found its candidates with, for each event."""
+    return {"threshold_deg": round(float(model["threshold_deg"]), 1),
+            "robust_sigmas": handling.SIGMA_LEVEL, "min_duration_s": handling.MIN_DURATION_S,
+            "opposite_lock_deg": handling.COUNTER_STEER_DEG}
+
+
+def apply_reviews(session, folder) -> int:
+    """Put the saved reviews of this file on its events; returns how many earlier
+    reviews no longer match an event (kept, with the event as it was detected)."""
+    store = rule_engine.ReviewStore(Path(folder) / "reviews")
+    left = rule_engine.apply_reviews(session.model.events, store.load(session.raw.sha256))
+    session.orphan_reviews = left
+    return len(left)
+
+
 def describe(event) -> dict:
     """An event as the row a panel shows."""
     ev = event.evidence
     peak = ev.get("peak")
     detail = ev.get("cause") or (f"peak {peak['value']:.3g} of {peak['of']}" if peak else "")
     status = getattr(event, "status", "candidate")
+    review = getattr(event, "review", {}) or {}
     if status == "recorded":
         what = f"{event.kind[0].upper() + event.kind[1:]} — recorded by the simulator"
         points = ev.get("points", 0)
         detail = f"{points:g}x incident points" if points else "flagged, no incident points"
     else:
         what = event.kind if event.kind.lower().startswith(("possible", "braking anomaly")) else f"Possible {event.kind}"
-        what = what[0].upper() + what[1:] + (" — confirmed by the simulator's record" if status == "confirmed" else " — requires review")
+        what = what[0].upper() + what[1:] + (
+            " — rejected on review" if status == "rejected" else
+            " — confirmed on review" if status == "confirmed" and review.get("verdict") == "confirmed" else
+            " — confirmed by the simulator's record" if status == "confirmed" else " — requires review")
     return {"lap": event.lap, "what": what, "status": status, "severity": event.severity,
+            "confidence": event.confidence, "limits": rule_engine.limits_text(getattr(event, "thresholds", {})),
+            "review": review,
             "where": f"{ev.get('corner', '')} {ev.get('phase', '')}".strip(), "position_m": event.position_m,
             "time": float(peak["at_s"]) if peak else 0.5 * (event.t_start + event.t_end), "detail": detail,
             "label": event.label, "rule": event.rule}

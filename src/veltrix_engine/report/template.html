@@ -52,6 +52,8 @@ section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .legend span { display: inline-flex; align-items: center; gap: 7px; }
 .sw { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
 .controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font-size: 13.5px; }
+.finding .nature { font-weight: 600; }
+.finding .nature.estimate { color: var(--s2); }
 .controls label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
 select { font: 500 13px var(--mono); color: var(--fg); background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; }
 select:focus-visible, .plot svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -301,6 +303,12 @@ dl.narrow { max-width: 560px; }
     <h3>Detected events</h3>
     <p class="sub" id="dataEventsLead"></p>
     <div class="scroll"><table id="dataEvents"></table></div>
+    <h3 id="dataOrphansHead">Earlier reviews of events no longer detected</h3>
+    <div class="scroll"><table id="dataOrphans"></table></div>
+    <h3>How confidence is decided</h3>
+    <ul class="limits" id="dataConfidence"></ul>
+    <details><summary>Every analysis threshold this report used (<code>veltrix thresholds</code> lists them; a project's thresholds.json overrides them)</summary>
+      <div class="scroll"><table id="dataThresholds"></table></div></details>
     <h3 id="dataNotesHead">Notes made by people</h3>
     <div class="scroll"><table id="dataNotes"></table></div>
   </section>
@@ -340,8 +348,8 @@ $("strip").innerHTML = [
 $("lapSub").textContent = `Every lap in the file, timed line to line. Laps come from ${M.lap_source}. Laps far slower than the best sit at the top edge.`;
 $("figures").innerHTML = [
   [fmt(best.time), `Best lap (lap ${best.lap})`],
-  D.corners ? [fmt(D.corners.ideal), `Ideal lap by corner, ${sign(D.corners.ideal - best.time)} s`]
-    : M.theoretical ? [fmt(M.theoretical), `Theoretical best, ${sign(M.theoretical - best.time)} s`] : null,
+  D.corners ? [fmt(D.corners.ideal), `Ideal lap by corner, ${sign(D.corners.ideal - best.time)} s — estimate, not driven`] : null,
+  M.theoretical ? [fmt(M.theoretical), `Best sectors added up, ${sign(M.theoretical - best.time)} s — estimate, not driven`] : null,
   [`${laps.length} / ${D.stints.length}`, "Laps / stints"],
   D.gg ? [`${D.gg.summary.peak_lat_g.toFixed(2)} g`, "Peak lateral, held 0.25 s" + (D.rebuilt.acc_lat ? ", rebuilt" : "")] : null,
   D.gg ? [`${D.gg.summary.peak_brake_g.toFixed(2)} g`, "Peak braking, held 0.25 s" + (D.rebuilt.acc_long_calc ? ", rebuilt" : "")] : null,
@@ -373,7 +381,7 @@ if (D.advice) for (const [area, id] of [["driver", "tipsDriver"], ["setup", "tip
     (s.note ? `<div class="gap">Partly assessed: ${esc(s.note)}.</div>` : "") +
     s.findings.map(f =>
       `<article class="finding"><h4>${esc(f.conclusion)}</h4>` +
-      `<div class="meta">${f.where ? `<span>${esc(f.where)}</span>` : ""}${worth(f) ? `<span class="gain">${worth(f)}</span>` : ""}</div>` +
+      `<div class="meta">${f.nature ? `<span class="nature ${f.nature}">${f.nature === "estimate" ? "Estimate — built from several laps, not driven" : "Measured"}</span>` : ""}${f.where ? `<span>${esc(f.where)}</span>` : ""}${worth(f) ? `<span class="gain">${worth(f)}</span>` : ""}</div>` +
       `<dl class="chain"><dt>Evidence</dt><dd><ul>${f.evidence.map(e => `<li>${esc(e)}</li>`).join("")}</ul></dd>` +
       `<dt>Calculation</dt><dd class="calc">${esc(f.calculation)}</dd>` +
       `<dt>Confidence</dt><dd><span class="lvl ${f.confidence.level}">${f.confidence.level}</span>${esc(f.confidence.basis)}</dd>` +
@@ -393,14 +401,22 @@ if (D.data) {
   $("dataMaths").innerHTML = head(["Name", "Formula", "Unit", "Version", "Invalid samples", "Kind"]) +
     X.maths.map(m => row([m.name, m.formula, m.unit, m.version, `${m.invalid} of ${m.samples}`, m.estimate ? "calculated — estimate" : "calculated"])).join("");
   const counts = Object.entries(X.event_counts).map(([k, n]) => `${k}: ${n}`).join(" · ");
-  const rec = X.events.filter(e => e.status === "recorded").length, conf = X.events.filter(e => e.status === "confirmed").length;
-  const statusText = { recorded: "recorded by the simulator", confirmed: "confirmed by a record", candidate: "candidate — review" };
+  const rec = X.events.filter(e => e.status === "recorded").length, conf = X.events.filter(e => e.status === "confirmed").length,
+        rej = X.events.filter(e => e.status === "rejected").length;
+  const statusText = { recorded: "recorded by the simulator", confirmed: "confirmed", candidate: "candidate — review", rejected: "rejected on review" };
   $("dataEventsLead").textContent = X.event_total
     ? `${X.event_total} events: ${rec ? rec + " recorded by the simulator, " : ""}${X.event_total - rec} found by the detectors` +
-      ` (${conf} of them confirmed by a record, the rest candidates for review). ${counts}. ${X.events.length} are listed, records first.`
+      ` (${conf} confirmed by a record or on review, ${rej} rejected on review, the rest candidates). ${counts}. ${X.events.length} are listed, records first.`
     : "No events were detected, or the detectors could not run on this file.";
-  $("dataEvents").innerHTML = X.events.length ? head(["Event", "Status", "Lap", "At (m)", "Time (s)", "Lasting (s)", "Severity", "Confidence"]) +
-    X.events.map(e => row([e.kind, statusText[e.status] || e.status, e.lap, e.at, e.t, e.dur, e.severity, e.confidence])).join("") : "";
+  $("dataEvents").innerHTML = X.events.length ? head(["Event", "Status", "Lap", "At (m)", "Time (s)", "Lasting (s)", "Severity", "Confidence", "Found with", "Review"]) +
+    X.events.map(e => row([e.kind, (statusText[e.status] || e.status) + (e.as_detected && e.as_detected !== e.status ? ` (detected as ${e.as_detected})` : ""),
+      e.lap, e.at, e.t, e.dur, e.severity, e.confidence, e.limits, e.review])).join("") : "";
+  $("dataOrphansHead").hidden = $("dataOrphans").hidden = !(X.orphan_reviews || []).length;
+  $("dataOrphans").innerHTML = head(["Event as first detected", "Lap", "Time (s)", "Detected as", "Confidence then", "Found with then", "Review"]) +
+    (X.orphan_reviews || []).map(o => row([o.kind, o.lap, o.t, o.detected_as, o.confidence, o.limits, o.review])).join("");
+  $("dataConfidence").innerHTML = (X.confidence_rule || []).map(t => `<li>${esc(t)}</li>`).join("");
+  $("dataThresholds").innerHTML = head(["Threshold", "Value"]) +
+    (X.thresholds || []).map(t => row([t.name, Array.isArray(t.value) ? t.value.join(", ") : t.value])).join("");
   $("dataNotesHead").hidden = $("dataNotes").hidden = !X.annotations.length;
   $("dataNotes").innerHTML = head(["Lap", "Time (s)", "Category", "Note", "Author"]) +
     X.annotations.map(a => row([a.lap, a.t, a.category, a.text, a.author])).join("");
@@ -794,11 +810,13 @@ function drawCorners() {
 }
 if (CN) {
   const order = [...CN.summary].sort((p, q) => q.available - p.available).slice(0, 3);
-  $("cornerSumSub").innerHTML = `Best is the fastest time through each corner's zone on any flying lap. Adding the bests gives an ideal lap of <b class="num">${fmt(CN.ideal)}</b>, <span class="num">${sign(CN.ideal - best.time)} s</span> against the best lap. On the table is the typical time minus the best: most in ${order.map(o => `<b>${o.corner}</b> (<span class="num">${o.available.toFixed(2)} s</span>)`).join(", ")}.`;
+  const suppliers = [...new Set(CN.summary.map(r => r.best_lap))].sort((p, q) => p - q);
+  const gapTotal = best.time - CN.ideal;
+  $("cornerSumSub").innerHTML = `Best is the fastest time through each corner's zone on any flying lap. Adding the bests gives an ideal lap of <b class="num">${fmt(CN.ideal)}</b>, <span class="num">${sign(CN.ideal - best.time)} s</span> against the best lap — <b>an estimate</b> put together from laps ${suppliers.join(", ")}; no lap was driven like this, so it is not a lap time to expect. "Best lap gives away" is each corner's part of that gap: the best lap's own time there minus the fastest. On the table is the typical time minus the best: most in ${order.map(o => `<b>${o.corner}</b> (<span class="num">${o.available.toFixed(2)} s</span>)`).join(", ")}.`;
   const kind = Object.fromEntries(CN.list.map(c => [c.corner, c]));
   const maxAvail = Math.max(...CN.summary.map(r => r.available));
-  $("cornerSummary").innerHTML = `<thead><tr><th>Corner</th><th>From–to m</th><th>Best s</th><th>Set on lap</th><th>Typical s</th><th>Spread s</th><th>On the table s</th><th>Typical min km/h</th></tr></thead><tbody>` +
-    CN.summary.map(r => { const c = kind[r.corner]; return `<tr><td>${cname(c)} · ${c.dir} · ${c.kind}</td><td>${c.start.toLocaleString("en-GB")}–${c.end.toLocaleString("en-GB")}</td><td>${r.best.toFixed(3)}</td><td>${r.best_lap}</td><td>${r.mean.toFixed(3)}</td><td>${r.spread.toFixed(3)}</td><td class="${r.available === maxAvail ? "best" : ""}">${r.available.toFixed(3)}</td><td>${r.min_speed}</td></tr>`; }).join("") + "</tbody>";
+  $("cornerSummary").innerHTML = `<thead><tr><th>Corner</th><th>From–to m</th><th>Best s</th><th>Set on lap</th><th>Best lap (${CN.best_lap}) s</th><th>Best lap gives away s</th><th>Typical s</th><th>Spread s</th><th>On the table s</th><th>Typical min km/h</th></tr></thead><tbody>` +
+    CN.summary.map(r => { const c = kind[r.corner]; return `<tr><td>${cname(c)} · ${c.dir} · ${c.kind}</td><td>${c.start.toLocaleString("en-GB")}–${c.end.toLocaleString("en-GB")}</td><td>${r.best.toFixed(3)}</td><td>${r.best_lap}</td><td>${r.on_best_lap == null ? "—" : r.on_best_lap.toFixed(3)}</td><td>${r.gap_on_best_lap == null ? "—" : r.gap_on_best_lap.toFixed(3) + (gapTotal > 0 && r.gap_on_best_lap > 0.005 ? ` (${Math.round(100 * r.gap_on_best_lap / gapTotal)}%)` : "")}</td><td>${r.mean.toFixed(3)}</td><td>${r.spread.toFixed(3)}</td><td class="${r.available === maxAvail ? "best" : ""}">${r.available.toFixed(3)}</td><td>${r.min_speed}</td></tr>`; }).join("") + "</tbody>";
 }
 // ── understeer / oversteer ─────────────────────────────────────────────────
 const HD = D.handling;

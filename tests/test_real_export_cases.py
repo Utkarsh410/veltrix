@@ -176,7 +176,7 @@ def test_inspect_command(capsys, tmp_path):
     code = cli_main(["inspect", str(GOLDEN / "monza_ac_gt3.csv.gz"), "--export", str(tmp_path / "out")])
     out = capsys.readouterr().out
     assert code == 0
-    for text in ("Laps", "← best", "Theoretical best", "Corners (", "Ideal lap", "Corner by corner",
+    for text in ("Laps", "← best", "Best sectors added up", "Corners (", "Ideal lap", "Corner by corner",
                  "against reference lap", "Track map"):
         assert text in out
     assert {p.name for p in (tmp_path / "out").iterdir()} == \

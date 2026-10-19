@@ -448,10 +448,18 @@ def corner_summary(session, corners: pd.DataFrame, metrics: pd.DataFrame) -> pd.
       mean_s, spread_s   typical time and its standard deviation (consistency)
       available_s        mean − best: time on the table in this corner
       min_speed_best, min_speed_mean
-    `attrs["ideal_lap_s"]` is the sum of the best zone times — the lap the
-    driver has already driven, one corner at a time."""
+    `attrs["ideal_lap_s"]` is the sum of the best zone times: a composite of
+    several laps, each corner driven at that pace once — not a lap that was driven.
+
+      on_best_lap_s       the session's best lap's own time through the zone
+      gap_on_best_lap_s   that minus best_s: this corner's part of the gap between
+                          the best lap and the ideal lap (they add up to it exactly)"""
     flying = set(session.laps.loc[session.laps["status"] == "flying", "lap"])
     m = metrics[metrics["lap"].isin(flying)] if flying else metrics
+    try:
+        best_lap = lap_engine.best_lap(session)
+    except (ValueError, KeyError):
+        best_lap = None
     rows = []
     for c in corners.itertuples():
         part = m[m["corner"] == c.corner]
@@ -463,10 +471,15 @@ def corner_summary(session, corners: pd.DataFrame, metrics: pd.DataFrame) -> pd.
                      "mean_s": float(part["zone_time_s"].mean()),
                      "spread_s": float(part["zone_time_s"].std(ddof=0)),
                      "available_s": float(part["zone_time_s"].mean() - best["zone_time_s"]),
+                     "on_best_lap_s": (float(part.loc[part["lap"] == best_lap, "zone_time_s"].iloc[0])
+                                       if (part["lap"] == best_lap).any() else np.nan),
                      "min_speed_best": float(part["min_speed"].max()),
                      "min_speed_mean": float(part["min_speed"].mean()), "laps": int(len(part))})
     out = pd.DataFrame(rows)
+    if len(out):
+        out["gap_on_best_lap_s"] = out["on_best_lap_s"] - out["best_s"]
     out.attrs["ideal_lap_s"] = float(out["best_s"].sum()) if len(out) else np.nan
+    out.attrs["best_lap"] = best_lap
     return out
 
 

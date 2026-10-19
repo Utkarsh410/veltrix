@@ -369,8 +369,38 @@ P1, done (the user chose "table under the charts"):
   accelerometer for braking; *_instant_g beside) — the Spa tiles read 3.23 g / 1.74 g before.
 - Key strips above charts are a fixed 18 px (`chart_layout.KEY_HEIGHT`).
 
-Next: P2 (lap potential: actual vs ideal-by-corner vs ideal-by-sector kept apart, which laps supplied each
-best corner, each corner's share of the gap, no composite lap presented as repeatable), then P3.
+P2, done:
+- Lap potential is four separate findings: the laps as driven (tagged **measured**); the ideal lap by corner
+  and the best sectors added up (each tagged **estimate**, "built from N different laps, not driven"); and
+  the typical lap against each corner's best pass. Findings carry `nature` ("measured" / "estimate"), shown in
+  text, Markdown and the HTML report.
+- Which laps supplied the fastest passes: "Built from lap 1 (5 corners: …); lap 2 (…)"; per sector the lap
+  that set it.
+- Each corner's part of the gap: `corner_summary` adds `on_best_lap_s` and `gap_on_best_lap_s` (the best lap's
+  zone time minus the fastest; they sum exactly to best lap − ideal); `laps.sector_breakdown()` does the same per
+  sector. Shown in the finding, the HTML corner summary ("Best lap gives away", with share) and inspect.
+- No composite is called a ceiling or a target: the estimate finding has no gain tag; the report summary's
+  `gain_s` carries `gain_basis` ("estimate: …"); HTML tiles and inspect say "estimate, not driven".
+
+P3, done:
+- **Thresholds and confidence exposed** — every rule event carries `Event.thresholds` (`events.rule_limits`: the
+  parameters its formulas use, directly or through helper channels; which were fitted to the session and from
+  what; minimum duration, merge gap, severity bands, rule confidence); steering-model candidates carry the
+  model's threshold, sigma level, duration and opposite-lock limit. Shown as "Found with" in the events panel
+  and the HTML data tab (`events.limits_text`). The HTML data tab also says how confidence is decided and lists
+  every analysis threshold (`thresholds.snapshot()`, now including `plausibility`).
+- **Confirm / reject / note** — events panel buttons Confirm, Reject, Note…, Clear review, and a detail box
+  (found with, evidence, review, status as detected). `MainWindow.review_event` / `clear_event_review`; author
+  is the login name. Status `rejected` added; a person's confirmation never overrules a simulator record.
+- **Original kept for audit** — `events.ReviewStore` (`<app data>/reviews/<sha256>.json`); each review keeps
+  the event exactly as first detected (`original`) and earlier verdicts (`history`); `apply_reviews` restores
+  the status as detected before applying, and returns reviews no event matches any more (rules changed) —
+  shown in the app summary and the HTML report ("Earlier reviews of events no longer detected").
+- Report.app / `veltrix report` read the reviews through `extras.apply`; the engineering report marks
+  balance-incident candidates confirmed or rejected on review.
+- Tests: `tests/test_event_review.py`.
+
+All four priorities (P0–P3) of the user's improvement list are done.
 
 ## Open items carried forward
 

@@ -31,14 +31,16 @@ still run.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 
 from . import maths
 from .maths import FormulaError, MathSet
-from .model import CONFIRMED, GAP_FACTOR, RECORDED, Event, SessionModel
+from .model import CANDIDATE, CONFIRMED, GAP_FACTOR, RECORDED, REJECTED, Event, SessionModel
 
 RULES_VERSION = 1
 _PREFIX = "__event_"
@@ -273,8 +275,10 @@ def detect(model: SessionModel, rules: RuleSet | None = None, fit: bool = False)
     report["_calibration"] lists what was changed."""
     rules = rules or default_rules()
     fitted = []
+    original = dict(rules.parameters)
     if fit:
         rules, fitted = calibrate(model, rules)
+    limits = {r.id: rule_limits(rules, r, original) for r in rules.rules}
     mset = MathSet()
     mset.parameters = dict(rules.parameters)
     for name, formula in rules.helpers.items():
@@ -365,7 +369,7 @@ def detect(model: SessionModel, rules: RuleSet | None = None, fit: bool = False)
                 events.append(Event(kind=r.title, t_start=t0, t_end=t1, lap=lap.lap if lap else None, position_m=None,
                                     severity=level, channels=tuple(r.evidence), evidence=evidence,
                                     confidence=f"{r.confidence} — requires review", rule=r.id,
-                                    rule_version=f"{r.version}", source="rule"))
+                                    rule_version=f"{r.version}", source="rule", thresholds=limits[r.id]))
                 kept += 1
             report[r.id] = {"ran": True, "events": kept, "message": f"{kept} found" if kept else "none found"}
     finally:
@@ -392,6 +396,150 @@ def _evidence_channel(model, results, name):
         return maths._lookup(model, name)
     except (KeyError, FormulaError):
         return None
+
+
+_PARAM = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def rule_limits(rules: RuleSet, rule: Rule, original: dict | None = None) -> dict:
+    """The limits a rule finds its events with, as they stand: every threshold
+    its formulas use (directly or through a helper channel), which of them were
+    fitted to this session and from what, its minimum duration and merge gap, and
+    the severity bands. Kept on each event so the classification can be audited
+    after the rules have changed."""
+    text = " ".join(x for x in (rule.on, rule.off, rule.severity) if x)
+    used_helpers = [h for h in rules.helpers if re.search(rf"\b{re.escape(h)}\b", text)]
+    text += " " + " ".join(rules.helpers[h] for h in used_helpers)
+    names = sorted(set(_PARAM.findall(text)))
+    params = {n: rules.parameters[n] for n in names if n in rules.parameters}
+    fitted = {n: {"was": original[n], "now": params[n]} for n in names
+              if original and n in original and n in params and abs(original[n] - params[n]) > 1e-12}
+    return {"rule": rule.id, "version": rule.version, "on": rule.on, "off": rule.off,
+            "parameters": params, "fitted": fitted, "min_duration_s": rule.min_duration_s,
+            "merge_gap_s": rule.merge_gap_s, "moderate": rule.moderate, "severe": rule.severe,
+            "rule_confidence": rule.confidence}
+
+
+def limits_text(thresholds: dict) -> str:
+    """A rule's limits in one line, for a table cell."""
+    if not thresholds:
+        return ""
+    if "parameters" in thresholds:
+        parts = [f"{k} {v:g}" + (f" (fitted from {thresholds['fitted'][k]['was']:g})" if k in thresholds.get("fitted", {}) else "")
+                 for k, v in thresholds["parameters"].items()]
+        if thresholds.get("min_duration_s"):
+            parts.append(f"at least {thresholds['min_duration_s']:g} s")
+        return ", ".join(parts)
+    return ", ".join(f"{k.replace('_', ' ')} {v:g}" if isinstance(v, (int, float)) else f"{k.replace('_', ' ')} {v}"
+                     for k, v in thresholds.items())
+
+
+# ── review: a person's verdict, kept beside what was detected ─────────────────
+
+VERDICTS = ("confirmed", "rejected")
+MATCH_S = 1.0                 # a review belongs to an event of the same rule and kind starting this close
+
+
+def _snapshot(e: Event) -> dict:
+    """An event exactly as it was detected — kept, unchanged, with every review."""
+    d = asdict(e)
+    d["channels"] = list(e.channels)
+    d.pop("review", None)
+    return json.loads(json.dumps(d, default=lambda o: o.item() if hasattr(o, "item") else str(o)))
+
+
+def make_review(event: Event, verdict: str, note: str = "", author: str = "", earlier: dict | None = None) -> dict:
+    """A review of one event: the verdict ("confirmed", "rejected" or "" for a
+    note alone), a note, who and when — and the event as first detected, so the
+    detector's own classification can be audited whatever happens later."""
+    if verdict not in VERDICTS + ("",):
+        raise ValueError(f"A verdict is one of {', '.join(VERDICTS)}, or empty for a note alone.")
+    original = (earlier or {}).get("original") or _snapshot(event)
+    return {"rule": event.rule, "kind": event.kind, "t_start": float(event.t_start), "t_end": float(event.t_end),
+            "lap": event.lap, "verdict": verdict, "note": note.strip(), "author": author.strip(),
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "original": original,
+            "history": list((earlier or {}).get("history", [])) + (
+                [{k: earlier[k] for k in ("verdict", "note", "author", "at")}] if earlier else [])}
+
+
+def _matches(review: dict, e: Event) -> bool:
+    return (review["rule"] == e.rule and review["kind"] == e.kind
+            and abs(review["t_start"] - e.t_start) <= MATCH_S)
+
+
+def find_review(reviews: list, event: Event) -> dict | None:
+    return next((r for r in reviews if _matches(r, event)), None)
+
+
+def apply_reviews(events: list, reviews: list) -> list:
+    """Put each review on its event: a confirmed one becomes "confirmed" (by a
+    person), a rejected one "rejected"; a note alone leaves the status. Returns
+    the reviews no event matches any more — the rules or thresholds changed —
+    which are kept, with the event as it was originally detected."""
+    left = list(reviews)
+    for e in events:
+        # start from the event as detected, so a changed or cleared review leaves no trace on it
+        e.status = e.evidence.setdefault("detected_status", e.status)
+        e.review = {}
+        r = find_review(left, e)
+        if r is None:
+            continue
+        left.remove(r)
+        e.review = {k: r[k] for k in ("verdict", "note", "author", "at")}
+        if r["verdict"] == "confirmed" and e.status != RECORDED:
+            e.status = CONFIRMED
+        elif r["verdict"] == "rejected" and e.status != RECORDED:
+            e.status = REJECTED
+    return left
+
+
+class ReviewStore:
+    """Reviews on disk: one JSON file per source file (by its SHA-256)."""
+
+    def __init__(self, folder: str | Path):
+        self.folder = Path(folder)
+
+    def _path(self, sha256: str) -> Path:
+        if not sha256 or not str(sha256).isalnum():
+            raise ValueError("Reviews are stored per source file; this session has no file identity.")
+        return self.folder / f"{sha256}.json"
+
+    def load(self, sha256: str) -> list:
+        try:
+            path = self._path(sha256)
+        except ValueError:
+            return []
+        if not path.exists():
+            return []
+        try:
+            return list(json.loads(path.read_text(encoding="utf-8"))["reviews"])
+        except (ValueError, KeyError, TypeError):
+            return []
+
+    def save(self, sha256: str, reviews: list) -> None:
+        path = self._path(sha256)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"version": 1, "reviews": reviews}, indent=1), encoding="utf-8")
+
+    def put(self, sha256: str, event: Event, verdict: str, note: str = "", author: str = "") -> dict:
+        """Record (or replace) the review of one event; earlier verdicts go into its history."""
+        reviews = self.load(sha256)
+        earlier = find_review(reviews, event)
+        if earlier is not None:
+            reviews.remove(earlier)
+        new = make_review(event, verdict, note, author, earlier)
+        reviews.append(new)
+        self.save(sha256, reviews)
+        return new
+
+    def clear(self, sha256: str, event: Event) -> bool:
+        reviews = self.load(sha256)
+        r = find_review(reviews, event)
+        if r is None:
+            return False
+        reviews.remove(r)
+        self.save(sha256, reviews)
+        return True
 
 
 # iRacing's irsdk_IncidentFlags, low byte: the kinds named are the ones the SDK documents

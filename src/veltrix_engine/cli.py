@@ -210,8 +210,8 @@ def inspect(args) -> int:
             print(f"  {str(row.lap):>4} " + " ".join(cells) + f" {fmt_time(row.lap_time_s):>10}")
         if len(flying):
             theo = lap_engine.theoretical_best(sectors)
-            print(f"  * best sector.  Theoretical best {fmt_time(theo)} "
-                  f"({theo - best_time:+.3f} s vs best lap {best})")
+            print(f"  * best sector.  Best sectors added up {fmt_time(theo)} "
+                  f"({theo - best_time:+.3f} s vs best lap {best}) — an estimate from several laps, not driven")
 
     # ── corners ────────────────────────────────────────────────────────────
     corner_result = None
@@ -236,7 +236,8 @@ def inspect(args) -> int:
                   f"{r.available_s:>9.3f} {r.min_speed_mean:>9.0f}  {c.name}".rstrip())
         ideal = corner_result["ideal_lap_s"]
         top = summary.sort_values("available_s", ascending=False).head(3)
-        print(f"  Ideal lap (best time through every corner): {fmt_time(ideal)} ({ideal - best_time:+.3f} s vs best lap {best})")
+        print(f"  Ideal lap by corner (best time through every corner): {fmt_time(ideal)} ({ideal - best_time:+.3f} s vs best "
+              f"lap {best}) — an estimate built from laps {', '.join(str(x) for x in sorted(set(summary['best_lap'])))}, not driven")
         print("  Most time on the table: " + ", ".join(f"{k} {v.available_s:.2f} s" for k, v in top.iterrows()))
 
     # ── understeer / oversteer ─────────────────────────────────────────────

@@ -21,12 +21,13 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from veltrix_engine import build_session, corners as corner_engine, read_file, supported_formats
 from veltrix_engine.importers import inspect_file
+from veltrix_engine.events import ReviewStore
 from veltrix_engine.report import write_report
 
 from .compare_view import CompareView
 from .channel_picker import ChannelPicker
 from .chart_layout import AXIS_WIDTH, EvenRows, set_key
-from .events import AnnotationStore, annotate, detect_events
+from .events import AnnotationStore, annotate, apply_reviews, detect_events
 from .extras import load_rules
 from .paths import data_dir
 from .rules_editor import RulesEditor
@@ -83,6 +84,14 @@ def default_maths_path() -> Path:
     return data_dir() / "maths.json"
 
 
+def _user_name() -> str:
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:                          # no login name (a service account, a container)
+        return ""
+
+
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, maths_path: str | Path | None = None):
         super().__init__()
@@ -96,6 +105,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._syncing = False
         self._apply_compare = True
         self._laps_shown: list = []
+        self.author = _user_name()                # who reviews events here, saved with each verdict
         self._maths_seen: set = set()
         pg.setConfigOptions(antialias=False, background="#0A0A0D", foreground="#9A97A6")
 
@@ -124,6 +134,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.events.jump.connect(self.go_to)
         self.events.add_note.connect(self.add_annotation)
         self.events.remove_note.connect(self.remove_annotation)
+        self.events.review.connect(self.review_event)
+        self.events.clear_review.connect(self.clear_event_review)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.events)
         self.videos = VideoStore(Path(maths_path or default_maths_path()).parent / "videos")
         self.video = VideoDock(self)
@@ -290,6 +302,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         rules, complaint = load_rules(self.data_folder)
         self.session.model.events, self.session.events_summary = detect_events(self.session, rules)
+        self._apply_reviews(self.session)
         self.events.show_model(self.session.model, self.session.events_summary)
         self.statusBar().showMessage(complaint or f"{len(self.session.model.events)} candidate event(s) with the saved rules.")
 
@@ -429,6 +442,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not hasattr(session, "events_summary"):              # a session handed over already loaded
             session.model.events, session.events_summary = detect_events(session, load_rules(self.data_folder)[0])
         session.model.annotations = self.notes.load(session.raw.sha256)
+        self._apply_reviews(session)
         self.events.show_model(session.model, session.events_summary)
         self.video.set_links(self.videos.load(session.raw.sha256), self.ws.cursor or 0.0)
         failed = [n for n, r in self.maths.compute(session.model).items() if not r.ok]
@@ -455,6 +469,33 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tabs.setCurrentIndex(0)
         self._plots[0].setXRange(*self.ws.zoom(t - span / 2, t + span / 2), padding=0)
         self.set_cursor(t)
+
+    # ── event review ──────────────────────────────────────────────────────────
+
+    def _apply_reviews(self, session):
+        orphans = apply_reviews(session, self.data_folder)
+        base = session.events_summary.split(" Earlier reviews:")[0]
+        session.events_summary = base + (
+            f" Earlier reviews: {orphans} refer to events no longer detected (rules or thresholds changed); kept with "
+            "the events as first detected." if orphans else "")
+
+    def review_event(self, row: int, verdict: str, note: str = ""):
+        """Confirm or reject one detected event, or note it. Saved per file, with the
+        event as it was detected, so the detector's classification can be audited."""
+        if self.session is None or not 0 <= row < len(self.session.model.events):
+            return
+        e = self.session.model.events[row]
+        ReviewStore(self.data_folder / "reviews").put(self.session.raw.sha256, e, verdict, note, author=self.author)
+        self._apply_reviews(self.session)
+        self.events.show_model(self.session.model, self.session.events_summary)
+        self.statusBar().showMessage(f"{e.kind}: {verdict or 'note'} saved.")
+
+    def clear_event_review(self, row: int):
+        if self.session is None or not 0 <= row < len(self.session.model.events):
+            return
+        ReviewStore(self.data_folder / "reviews").clear(self.session.raw.sha256, self.session.model.events[row])
+        self._apply_reviews(self.session)
+        self.events.show_model(self.session.model, self.session.events_summary)
 
     def add_annotation(self, text: str, category: str = ""):
         if self.session is None:

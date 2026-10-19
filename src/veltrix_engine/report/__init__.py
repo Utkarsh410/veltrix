@@ -104,9 +104,12 @@ def report_data(session, title: str | None = None) -> dict:
                          for c in found.itertuples()],
                 "laps": per_lap,
                 "summary": [{"corner": r.corner, "best": _r(r.best_s), "best_lap": r.best_lap, "mean": _r(r.mean_s),
+                             "on_best_lap": _r(getattr(r, "on_best_lap_s", np.nan)),
+                             "gap_on_best_lap": _r(getattr(r, "gap_on_best_lap_s", np.nan)),
                              "spread": _r(r.spread_s), "available": _r(r.available_s),
                              "min_speed": _r(r.min_speed_mean, 0)} for r in summary.itertuples()],
-                "ideal": _r(summary.attrs["ideal_lap_s"]), "thresholds": corner_engine.FINDING}
+                "ideal": _r(summary.attrs["ideal_lap_s"]), "best_lap": summary.attrs.get("best_lap"),
+                "thresholds": corner_engine.FINDING}
         except ValueError:
             corner_block = None
 
@@ -240,9 +243,29 @@ def _data_block(s, engineering_block: dict) -> dict | None:
     # what the source recorded first, then the most severe candidates
     worst = sorted(model.events, key=lambda e: (getattr(e, "status", "candidate") != "recorded",
                                                 {"severe": 0, "moderate": 1, "mild": 2}.get(e.severity, 3)))[:40]
+    from .. import events as event_rules
+    review_text = lambda r: ((r.get("verdict") or "note") + (f" — {r['note']}" if r.get("note") else "")
+                             + (f" ({r['author']}, {r.get('at', '')[:10]})" if r.get("author") else "")) if r else ""
     events = [{"kind": e.kind, "lap": e.lap, "at": _r(e.position_m, 0), "t": _r(e.t_start, 2), "dur": _r(e.t_end - e.t_start, 2),
-               "severity": e.severity, "confidence": e.confidence, "status": getattr(e, "status", "candidate")}
+               "severity": e.severity, "confidence": e.confidence, "status": getattr(e, "status", "candidate"),
+               "limits": event_rules.limits_text(getattr(e, "thresholds", {})),
+               "review": review_text(getattr(e, "review", {}) or {}),
+               "as_detected": (getattr(e, "evidence", {}) or {}).get("detected_status", "")}
               for e in sorted(worst, key=lambda e: e.t_start)]
+    orphans = [{"kind": r["original"].get("kind", r.get("kind")), "lap": r.get("lap"), "t": _r(r.get("t_start"), 2),
+                "detected_as": r["original"].get("status", ""), "confidence": r["original"].get("confidence", ""),
+                "limits": event_rules.limits_text(r["original"].get("thresholds", {})), "review": review_text(r)}
+               for r in getattr(s, "orphan_reviews", []) or []]
+    from .. import thresholds as threshold_registry
+    from ..analysis import engineering as eng
+    confidence_rule = [
+        f"High: {eng.LAPS_HIGH} or more flying laps and an effect at least {eng.RATIO_HIGH:g} times its lap-to-lap scatter.",
+        f"Medium: {eng.LAPS_MEDIUM}–{eng.LAPS_HIGH - 1} flying laps, or an effect {eng.RATIO_MEDIUM:g}–{eng.RATIO_HIGH:g} times its scatter.",
+        f"Low: fewer than {eng.LAPS_MEDIUM} flying laps, or an effect smaller than its scatter.",
+        "Each finding takes the lowest of these, of the data quality behind it (a rebuilt or coarse channel caps it) and of "
+        "any named limit, given beside it.",
+        "Detected events carry their rule's own confidence and stay candidates until a record or a person confirms them."]
+    analysis_thresholds = [{"name": k, "value": v} for k, v in sorted(threshold_registry.snapshot().items())]
     limits = [m for level, m in s.notes if level == "warning"]
     limits += [f"{sec['title']}: not assessed — {sec['not_assessed']}." for sec in engineering_block["sections"] if sec["not_assessed"]]
     assumed = [c.id for c in model.channels("normalised") if c.provenance.unit_source == "assumed"]
@@ -256,7 +279,8 @@ def _data_block(s, engineering_block: dict) -> dict | None:
             "event_total": len(model.events), "annotations": [{"lap": a.lap, "t": _r(a.time, 2), "text": a.text,
                                                                "category": a.category, "author": a.author}
                                                               for a in model.annotations],
-            "limitations": limits, "counts": s.count_lines() if hasattr(s, "count_lines") else []}
+            "limitations": limits, "counts": s.count_lines() if hasattr(s, "count_lines") else [],
+            "orphan_reviews": orphans, "confidence_rule": confidence_rule, "thresholds": analysis_thresholds}
 
 
 def _plain(o):

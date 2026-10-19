@@ -48,8 +48,8 @@ EVENT, INTERPRETATION, HYPOTHESIS = "detected event", "interpretation", "hypothe
 LABELS = (MEASURED, RECONSTRUCTED, CALCULATED, EVENT, INTERPRETATION, HYPOTHESIS)
 # how far an event is established: a detector's candidate; recorded by the source itself (a simulator's
 # incident system); or a candidate a record (or, later, a person) confirmed
-CANDIDATE, RECORDED, CONFIRMED = "candidate", "recorded", "confirmed"
-STATUSES = (CANDIDATE, RECORDED, CONFIRMED)
+CANDIDATE, RECORDED, CONFIRMED, REJECTED = "candidate", "recorded", "confirmed", "rejected"
+STATUSES = (CANDIDATE, RECORDED, CONFIRMED, REJECTED)
 UNKNOWN_UNIT = "unknown"
 GAP_FACTOR = 5.0          # a step longer than this many median steps is a gap; alignment does not bridge it
 
@@ -223,6 +223,8 @@ class Event:
     label: str = EVENT
     status: str = CANDIDATE
     source: str = ""                   # what found it: "rule", "steering model", "simulator"
+    thresholds: dict = field(default_factory=dict)   # the limits it was found with, as they were at the time
+    review: dict = field(default_factory=dict)       # a person's verdict: {verdict, note, author, at}
 
 
 @dataclass
@@ -357,7 +359,7 @@ def laps_from_table(table: pd.DataFrame) -> tuple[list, list]:
 
 
 def events_from_incidents(events: pd.DataFrame, laps: pd.DataFrame, rule_version: str = "",
-                          lap_distance: Channel | None = None) -> list:
+                          lap_distance: Channel | None = None, thresholds: dict | None = None) -> list:
     """Event entities from the understeer / oversteer detector's table
     (analysis/handling.py). The detector works in distance; each event's time
     is read from the lap-distance channel when one is given, and otherwise
@@ -382,5 +384,5 @@ def events_from_incidents(events: pd.DataFrame, laps: pd.DataFrame, rule_version
             evidence={"corner": e.corner, "phase": e.phase, "cause": e.cause, "peak_deg": float(e.peak_deg),
                       "speed_kmh": float(e.speed), "lat_g": float(e.lat_g)},
             confidence="requires review", rule="steering residual against the session's own norm",
-            rule_version=rule_version, source="steering model"))
+            rule_version=rule_version, source="steering model", thresholds=dict(thresholds or {})))
     return out

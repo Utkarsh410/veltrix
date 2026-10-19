@@ -15,7 +15,7 @@ from veltrix_engine import events as rule_engine
 from veltrix_engine import maths
 from veltrix_engine.maths import MathSet
 
-from .events import AnnotationStore, detect_events
+from .events import AnnotationStore, apply_reviews, detect_events
 from .paths import data_dir
 
 
@@ -51,6 +51,10 @@ def apply(session, folder: str | Path | None = None) -> dict:
     if complaint:
         problems.append(complaint)
     session.model.events, summary = detect_events(session, rules)
+    orphans = apply_reviews(session, folder)
+    if orphans:
+        summary += (f" {orphans} earlier review(s) refer to events no longer detected (the rules or thresholds changed); "
+                    "they are kept with the events as first detected.")
     session.events_summary = summary
     session.model.annotations = AnnotationStore(folder / "annotations").load(session.raw.sha256)
     return {"maths": results, "events": summary, "notes": len(session.model.annotations), "problems": problems}

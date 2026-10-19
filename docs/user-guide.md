@@ -205,6 +205,17 @@ Your own notes are separate: type one and press **Add note at cursor**. Notes
 are drawn as dashed lines on the charts and are saved with the file, so they
 are back the next time the same file is opened.
 
+
+**Reviewing an event.** Select an event in **Events and notes** and press
+**Confirm** (it happened — you checked the video, the driver, the data),
+**Reject** (a false detection) or **Note…**; **Clear review** takes your verdict
+off. Each event shows what it was found with (the rule's thresholds, and which
+were fitted to this session) and its confidence; the box underneath shows the
+evidence, your review and the status as first detected. Reviews are saved per
+file and come back when it is opened again, and the report built from the app's
+data shows them. If the rules or thresholds change so that an event is no longer
+found, its review is kept, with the event as it was originally detected.
+
 ## 9. Video — experimental
 
 **Add video…** in the Video panel links a recording to the session.

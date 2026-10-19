@@ -378,6 +378,24 @@ def sector_times(session, boundaries=None, n_sectors: int = 3) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def sector_breakdown(sectors: pd.DataFrame, best_lap, statuses=("flying",)) -> pd.DataFrame:
+    """Each sector's fastest time over the laps with these statuses, the lap that
+    set it, the best lap's own time there and the difference. The differences add
+    up to best lap − theoretical best. One row per sector."""
+    pool = sectors[sectors["status"].isin(statuses)] if "status" in sectors else sectors
+    if pool.empty:
+        pool = sectors
+    cols = [c for c in pool.columns if c.startswith("s") and c[1:].isdigit()]
+    own = pool[pool["lap"] == best_lap]
+    rows = []
+    for col in cols:
+        i = pool[col].idxmin()
+        mine = float(own[col].iloc[0]) if len(own) else np.nan
+        rows.append({"sector": col.upper(), "best_s": float(pool.loc[i, col]), "best_lap": pool.loc[i, "lap"],
+                     "on_best_lap_s": mine, "gap_on_best_lap_s": mine - float(pool.loc[i, col])})
+    return pd.DataFrame(rows)
+
+
 def theoretical_best(sectors: pd.DataFrame, statuses=("flying",)) -> float:
     """Sum of the best sector times over laps with the given statuses."""
     pool = sectors[sectors["status"].isin(statuses)] if "status" in sectors else sectors

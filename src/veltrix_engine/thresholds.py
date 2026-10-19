@@ -30,10 +30,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from . import corners, derived, laps, session
-from .analysis import advice, balance, engineering, gg, handling, tyres
+from .analysis import advice, balance, engineering, gg, handling, plausibility, tyres
 
 MODULES = {"session": session, "laps": laps, "derived": derived, "corners": corners, "handling": handling,
-           "balance": balance, "gg": gg, "tyres": tyres, "advice": advice, "engineering": engineering}
+           "balance": balance, "gg": gg, "tyres": tyres, "advice": advice, "engineering": engineering,
+           "plausibility": plausibility}
 
 
 def _tunable(value) -> bool:

@@ -112,10 +112,22 @@ def test_lap_potential_is_best_lap_against_the_sum_of_best_zones(monza, reports)
     report = reports["monza"]
     corner = C.analyse(monza)
     best = monza.laps.loc[monza.laps["status"] == "flying", "lap_time_s"].min()
-    head = section(report, "lap_potential")["findings"][0]
-    assert head["gain_s"] == pytest.approx(best - corner["ideal_lap_s"], abs=1e-3)
-    assert report["summary"]["gain_s"] == head["gain_s"]
-    assert "2:37.680" in head["evidence"][0] and "Σ" in head["calculation"]
+    found = section(report, "lap_potential")["findings"]
+    # the laps as driven come first, and are marked measured
+    assert found[0]["nature"] == "measured" and found[0]["conclusion"].startswith("Best lap 2:37.680 on lap 4")
+    # the ideal lap by corner is an estimate built from named laps, never a gain banked or a ceiling
+    est = found[1]
+    assert est["nature"] == "estimate" and est["conclusion"].startswith("Estimate: the best pass through every corner")
+    assert "not driven" in est["conclusion"] and est["gain_s"] is None
+    assert any(e.startswith("Built from lap") for e in est["evidence"])
+    assert not any("ceiling" in f["recommendation"] or "Aim for" in f["recommendation"] for f in found)
+    # each corner's part of the gap adds up to the gap exactly
+    parts = corner["summary"]["gap_on_best_lap_s"]
+    assert parts.sum() == pytest.approx(best - corner["ideal_lap_s"], abs=1e-6) and (parts >= -1e-9).all()
+    assert report["summary"]["gain_s"] == pytest.approx(best - corner["ideal_lap_s"], abs=1e-3)
+    assert "estimate" in report["summary"]["gain_basis"]
+    sectors = next(f for f in found if "three equal sectors" in f["conclusion"])
+    assert sectors["nature"] == "estimate" and len([e for e in sectors["evidence"] if e.startswith("S")]) == 3
     top = corner["summary"].sort_values("available_s", ascending=False)["corner"].tolist()[:3]
     assert [p["corner"] for p in report["summary"]["priorities"]] == top
     assert all(p["findings"] for p in report["summary"]["priorities"]), "each priority corner is explained somewhere"
@@ -154,7 +166,8 @@ def test_the_braking_point_is_where_braking_starts_not_a_second_press(monza):
 
 def test_a_clean_session_says_so_with_evidence(reports):
     report = reports["synthetic"]
-    assert section(report, "lap_potential")["findings"][0]["conclusion"].startswith("The best lap is the ideal lap")
+    assert section(report, "lap_potential")["findings"][1]["conclusion"].startswith(
+        "Estimate: the best pass through every corner adds up to within")
     assert findings(report, "incidents")[0]["conclusion"] == "No understeer or oversteer incident on any lap"
     assert findings(report, "setup_hypotheses")[0]["conclusion"] == "No setup change is indicated by this session"
     assert any("inside the operating window" in f["conclusion"] for f in findings(report, "tyres"))

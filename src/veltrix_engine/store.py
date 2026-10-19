@@ -79,8 +79,13 @@ def _events(session: Session, rules) -> list:
     try:
         from .analysis import handling
         result = handling.analyse(session)
+        m = result["model"]
         found += events_from_incidents(result["events"], session.laps, "handling 1",
-                                       session.model.get("lap_distance") if session.model.has("lap_distance") else None)
+                                       session.model.get("lap_distance") if session.model.has("lap_distance") else None,
+                                       thresholds={"threshold_deg": round(float(m["threshold_deg"]), 1),
+                                                   "robust_sigmas": handling.SIGMA_LEVEL,
+                                                   "min_duration_s": handling.MIN_DURATION_S,
+                                                   "opposite_lock_deg": handling.COUNTER_STEER_DEG})
     except Exception:
         pass
     recorded = event_engine.recorded_incidents(session.model)

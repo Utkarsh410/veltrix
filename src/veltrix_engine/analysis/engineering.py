@@ -99,15 +99,24 @@ def _join(names) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
+MEASURED, ESTIMATE = "measured", "estimate"
+NATURE_TEXT = {MEASURED: "Measured: times the car actually did.",
+               ESTIMATE: "Estimate: put together from several laps — no lap was driven like this."}
+
+
 def _finding(conclusion, evidence, calculation, confidence, recommendation, where="", gain_s=None,
-             at_stake_s=None) -> dict:
+             at_stake_s=None, nature=None) -> dict:
     """gain_s: seconds a lap this finding alone is worth. at_stake_s: the time
     available in the zones it concerns — shared with every other finding about
-    those zones, so the two must not be added up across findings."""
+    those zones, so the two must not be added up across findings. nature:
+    MEASURED or ESTIMATE where a reader could take one for the other."""
     num = lambda x: None if x is None or not np.isfinite(x) else round(float(x), 3)
-    return {"conclusion": conclusion, "where": where, "evidence": list(evidence), "calculation": calculation,
-            "confidence": confidence, "recommendation": recommendation, "gain_s": num(gain_s),
-            "at_stake_s": num(at_stake_s)}
+    out = {"conclusion": conclusion, "where": where, "evidence": list(evidence), "calculation": calculation,
+           "confidence": confidence, "recommendation": recommendation, "gain_s": num(gain_s),
+           "at_stake_s": num(at_stake_s)}
+    if nature:
+        out["nature"] = nature
+    return out
 
 
 class _Ctx:
@@ -275,79 +284,119 @@ BEST_VS_TYPICAL = ("For each corner the fastest pass (lowest zone time on a flyi
 # ── 1. lap potential ──────────────────────────────────────────────────────────
 
 def _lap_potential(c: _Ctx) -> list:
+    """What the driver did, kept apart from what the pieces of different laps add
+    up to. Actual lap times are measured; an ideal lap by corner or by sector is a
+    composite estimate, never a lap that was driven or shown to be repeatable."""
     s, out = c.session, []
-    times = s.laps.loc[s.laps["status"] == "flying", "lap_time_s"].to_numpy(float)
+    times = s.laps.loc[s.laps["status"] == "flying", ["lap", "lap_time_s"]]
     summary = c.summary.sort_values("available_s", ascending=False)
     zones = len(summary)
+
+    # 1. the laps as driven
+    if c.n >= 1:
+        t = times["lap_time_s"].to_numpy(float)
+        sd, median = (float(np.std(t)), float(np.median(t))) if c.n >= 2 else (np.nan, float(t[0]))
+        label = ("consistent" if sd < CONSISTENT_S else "loose" if sd > LOOSE_S else "moderately consistent") if c.n >= 3 else ""
+        out.append(_finding(
+            f"Best lap {fmt_time(c.best_time)} on lap {c.best_lap}"
+            + (f"; lap times are {label}, ±{sd:.2f} s over {c.n} flying laps" if label else f", from {c.n} flying lap(s)"),
+            [f"Flying laps: {', '.join(f'lap {r.lap} {fmt_time(r.lap_time_s)}' for r in times.itertuples())}",
+             f"Median {fmt_time(median)}, {median - c.best_time:.2f} s off the best"],
+            "Lap times as timed at the start/finish line. Out-laps, in-laps, pit laps, laps marked slow and laps that "
+            f"cut the track are left out. Below {CONSISTENT_S:g} s standard deviation is called consistent, above "
+            f"{LOOSE_S:g} s loose.",
+            c.conf(),
+            ("The lap time is repeatable, so differences between laps of this size mean something when a change is "
+             "tested." if c.n >= 3 and sd < CONSISTENT_S else
+             f"Treat a setup or technique change as real only if it moves the lap time by more than about {2 * sd:.1f} s, "
+             "or judge it on the corner it targets instead of the whole lap." if c.n >= 3 else
+             "Run more laps before comparing lap times: one or two laps do not show how repeatable the pace is."),
+            "whole lap", nature=MEASURED))
+
+    # 2. the ideal lap by corner — an estimate, built from named laps
     gap = c.best_time - c.ideal
+    split = summary.dropna(subset=["gap_on_best_lap_s"]) if "gap_on_best_lap_s" in summary else summary.iloc[0:0]
+    from_laps = summary.groupby("best_lap", sort=True)["corner"].apply(list)
+    evidence = [f"Fastest pass through each of the {zones} corner zones, added together: {fmt_time(c.ideal)}, "
+                f"{gap:.3f} s under the best lap"]
+    evidence.append("Built from " + "; ".join(
+        f"lap {lap} ({len(cs)} corner{'s' if len(cs) > 1 else ''}: {_join(cs)})" for lap, cs in from_laps.items()))
+    if len(split):
+        owed = split[split["gap_on_best_lap_s"] > 0.005].sort_values("gap_on_best_lap_s", ascending=False)
+        evidence.append("Where the gap is, against the best lap: " + ", ".join(
+            f"{r.corner} {r.gap_on_best_lap_s:.2f} s ({r.gap_on_best_lap_s / gap:.0%}, best pass on lap {r.best_lap})"
+            for r in owed.head(6).itertuples()) + (f", and {len(owed) - 6} more" if len(owed) > 6 else ""))
+        level = split[split["gap_on_best_lap_s"] <= 0.005]["corner"]
+        if len(level):
+            evidence.append(f"The best lap is already the fastest pass in {_join(level)}")
     wide = c.metrics.pivot_table(index="lap", columns="corner", values="zone_time_s")
     second = float(np.sort(wide.to_numpy(), axis=0)[1].sum()) if c.n >= 3 and not wide.isna().any().any() else np.nan
-    evidence = [f"Best lap {fmt_time(c.best_time)} (lap {c.best_lap}), from {c.n} flying laps",
-                f"Fastest pass through each of the {zones} zones added together: {fmt_time(c.ideal)} "
-                f"({gap:.3f} s under the best lap), taken from laps {_join(sorted(set(summary['best_lap'])))}"]
     if np.isfinite(second):
-        evidence.append(f"Second-fastest pass through each zone added together: {fmt_time(second)} "
-                        f"({c.best_time - second:+.3f} s against the best lap)")
-    theoretical = np.nan
+        evidence.append(f"Second-fastest pass through each zone, added together: {fmt_time(second)} "
+                        f"({c.best_time - second:+.3f} s against the best lap) — also an estimate")
+    calc = (ZONES_CALC + "Ideal lap by corner = the sum over zones of each zone's fastest time on any flying lap. A "
+            "corner's part of the gap = the best lap's time in that zone minus the fastest time there; the parts add "
+            "up to the gap. Second-fastest sum = the same with each zone's second-lowest time, leaving out its single "
+            "luckiest pass.")
+    caps = [("medium", "a sum of best passes is optimistic: every minimum includes its share of favourable scatter, "
+                       "and no lap combined them")]
+    top = split.sort_values("gap_on_best_lap_s", ascending=False).head(3) if len(split) else summary.head(3)
+    if gap < MIN_GAIN_S:
+        out.append(_finding(
+            f"Estimate: the best pass through every corner adds up to within {max(gap, 0):.2f} s of the best lap",
+            evidence, calc, c.conf(uses=("speed",), caps=caps),
+            "The best lap already holds nearly every best corner. More pace has to come from doing something "
+            "differently — technique or the car — not from repeating what has already been done.",
+            "whole lap", 0.0, nature=ESTIMATE))
+    else:
+        where = ", ".join(f"{r.corner} ({r.gap_on_best_lap_s:.2f} s)" for r in top.itertuples()) if len(split) else ""
+        out.append(_finding(
+            f"Estimate: the best pass through every corner adds up to {fmt_time(c.ideal)}, {gap:.2f} s under the best "
+            f"lap — built from {len(from_laps)} different laps, not driven",
+            evidence, calc, c.conf(uses=("speed",), caps=caps),
+            "No lap has put these corners together, so this is a measure of what the driver has shown in pieces, not a "
+            "lap time to expect"
+            + (f"; the second-fastest passes ({fmt_time(second)}) are a steadier guide to what is within reach. "
+               if np.isfinite(second) and second < c.best_time else ". ")
+            + (f"The best lap gives most of the gap away in {where}: start there." if where else ""),
+            "whole lap", nature=ESTIMATE))
+
+    # 3. the ideal lap by sector — a second, coarser estimate, kept apart
     if c.n >= 2:
         sectors = lap_engine.sector_times(s)
         theoretical = float(lap_engine.theoretical_best(sectors))
-        evidence.append(f"Best of three equal-length sectors added together: {fmt_time(theoretical)}")
-    calc = (ZONES_CALC + "Ideal lap = Σ over zones of the minimum zone time on flying laps. Repeatable lap = Σ of the "
-            "second-lowest zone time, which leaves out each zone's single luckiest pass. Sector figure = Σ of the "
-            "minimum time in each of three equal-length sectors.")
-    caps = [("medium", "a sum of best passes is optimistic: every minimum includes its share of favourable scatter")]
-    top = summary.head(3)
-    where_top = ", ".join(f"{r.corner} {r.available_s:.2f} s" for r in top.itertuples())
-    if gap < MIN_GAIN_S:
+        parts = lap_engine.sector_breakdown(sectors, c.best_lap)
         out.append(_finding(
-            f"The best lap is the ideal lap to within {max(gap, 0):.2f} s", evidence, calc,
-            c.conf(uses=("speed",), caps=caps),
-            "The driver put their best corners together on one lap. More pace now has to come from doing something "
-            "differently — technique or the car — not from repeating what has already been done.",
-            "whole lap", 0.0))
-    else:
-        realistic = second if np.isfinite(second) and second < c.best_time else np.nan
-        target = (f"Aim for {fmt_time(realistic)} next: it needs nothing the driver has not already done twice. "
-                  if np.isfinite(realistic) else "")
-        out.append(_finding(
-            f"{gap:.2f} s is available from driving this driver's own best corners on one lap", evidence, calc,
-            c.conf(uses=("speed",), caps=caps),
-            target + f"{fmt_time(c.ideal)} is the ceiling with this car as it is. Start where the typical lap gives "
-            f"away the most: {where_top}.", "whole lap", gap))
+            f"Estimate: the best of three equal sectors adds up to {fmt_time(theoretical)}, "
+            f"{c.best_time - theoretical:.2f} s under the best lap",
+            [f"{r.sector}: fastest {r.best_s:.3f} s on lap {r.best_lap}; the best lap {r.on_best_lap_s:.3f} s "
+             f"({r.gap_on_best_lap_s:+.3f} s)" for r in parts.itertuples()]
+            + [f"By corner the same idea gives {fmt_time(c.ideal)}: more, shorter pieces each catch a little more luck, "
+               "so the corner figure is usually the lower of the two"],
+            "The lap is cut into three sectors of equal length from the start/finish line; each sector's fastest time "
+            "on any flying lap is added up. Sector parts of the gap = the best lap's sector time minus the fastest.",
+            c.conf(caps=[("medium", "a composite of different laps; no lap combined these sectors")]),
+            "Use it beside the corner figure, not instead of it: the two estimates bracket what the pieces add up to. "
+            "Neither has been driven.", "whole lap", nature=ESTIMATE))
 
+    # 4. where a typical lap gives time away — against each corner's best pass
     total = float(summary["available_s"].sum())
-    if float(summary["available_s"].max()) >= MIN_GAIN_S:
+    if len(summary) and float(summary["available_s"].max()) >= MIN_GAIN_S:
+        top_typ = summary.head(3)
         by_kind = summary.groupby("kind")["available_s"].sum()
-        share = float(top["available_s"].sum() / total)
+        share = float(top_typ["available_s"].sum() / total)
         out.append(_finding(
-            f"{share:.0%} of the time a typical lap gives away is in {_join(top['corner'])}",
+            f"{share:.0%} of the time a typical lap gives away is in {_join(top_typ['corner'])}",
             [f"A typical lap is {total:.2f} s slower than the best pass through every zone"]
             + [f"{r.corner} ({r.kind}): typical {r.mean_s:.2f} s, best {r.best_s:.2f} s on lap {r.best_lap}, "
-               f"{r.available_s:.2f} s available, spread ±{r.spread_s:.2f} s" for r in top.itertuples()]
+               f"{r.available_s:.2f} s available, spread ±{r.spread_s:.2f} s" for r in top_typ.itertuples()]
             + ["By corner type: " + ", ".join(f"{k} {v:.2f} s" for k, v in by_kind.items())],
             ZONES_CALC + "Available time in a zone = mean zone time over flying laps − fastest zone time. Corner type "
             f"by minimum speed: slow below {corner_engine.SLOW_KMH:.0f} km/h, fast above {corner_engine.FAST_KMH:.0f} km/h.",
-            c.conf(uses=("speed",), effect=float(top["available_s"].mean()), scatter=float(top["spread_s"].mean())),
-            f"Work on {_join(top['corner'])} first, in that order. Braking, cornering and traction below say what "
+            c.conf(uses=("speed",), effect=float(top_typ["available_s"].mean()), scatter=float(top_typ["spread_s"].mean())),
+            f"Work on {_join(top_typ['corner'])} first, in that order. Braking, cornering and traction below say what "
             "differed between the best pass and the typical one in each.",
-            _join(top["corner"]), at_stake_s=float(top["available_s"].sum())))
-
-    if c.n >= 3:
-        sd, median = float(np.std(times)), float(np.median(times))
-        label = "consistent" if sd < CONSISTENT_S else "loose" if sd > LOOSE_S else "moderately consistent"
-        out.append(_finding(
-            f"Lap times are {label}: ±{sd:.2f} s over {c.n} flying laps",
-            [f"Flying laps: {', '.join(fmt_time(t) for t in times)}",
-             f"Median {fmt_time(median)}, {median - c.best_time:.2f} s off the best"],
-            "Standard deviation and median of the flying-lap times. Out-laps, in-laps, pit laps, laps marked slow and "
-            f"laps that cut the track are left out. Below {CONSISTENT_S:g} s is called consistent, above {LOOSE_S:g} s loose.",
-            c.conf(),
-            ("The lap time is repeatable, so differences between laps of this size mean something when a change is "
-             "tested." if sd < CONSISTENT_S else
-             "Treat a setup or technique change as real only if it moves the lap time by more than about "
-             f"{2 * sd:.1f} s, or judge it on the corner it targets instead of the whole lap."),
-            "whole lap"))
+            _join(top_typ["corner"]), at_stake_s=float(top_typ["available_s"].sum())))
     return out
 
 
@@ -1120,8 +1169,16 @@ def _incidents(c: _Ctx) -> list:
             def backed(e):
                 """A recorded incident on the same lap, in the same corner: the candidate is confirmed by it."""
                 return next((r for r in recorded if r["lap"] == e.lap and r["corner"] == e.corner), None)
+            reviewed_events = [m for m in getattr(s.model, "events", []) if m.source == "steering model" and m.review]
+
+            def verdict(e):
+                """A person's verdict on this candidate, from the app's event review."""
+                m = next((m for m in reviewed_events if m.lap == e.lap and m.position_m is not None
+                          and abs(m.position_m - e.peak_m) <= 10.0), None)
+                return m.review if m is not None else {}
+            rejected = sum(verdict(e).get("verdict") == "rejected" for e in ev.itertuples())
             n_us, n_os = int((ev["kind"] == "understeer").sum()), int((ev["kind"] == "oversteer").sum())
-            n_conf = sum(backed(e) is not None for e in ev.itertuples())
+            n_conf = sum(backed(e) is not None or verdict(e).get("verdict") == "confirmed" for e in ev.itertuples())
             strong = ev[ev["severity"] != "mild"].sort_values("cost_s", ascending=False)
             cost = ev.groupby(["lap", "corner"])["cost_s"].first()
             total = float(cost[cost > 0].sum())
@@ -1129,19 +1186,26 @@ def _incidents(c: _Ctx) -> list:
                         f"{int((ev['severity'] == 'severe').sum())} severe, {int((ev['severity'] == 'moderate').sum())} moderate"
                         + (f"; {n_conf} confirmed by a simulator record" if recorded else
                            "; none can be confirmed — the file has no incident record")]
-            for e in strong.head(6).itertuples():
+            shown = list(strong.head(6).itertuples())
+            shown += [e for e in ev.itertuples() if verdict(e) and all(e.Index != x.Index for x in shown)]   # reviewed ones always
+            for e in shown:
                 lock = f", {e.opposite_lock_deg:.0f} deg of opposite lock" if e.counter_steer else ""
                 paid = f", {e.cost_s:+.2f} s in the zone" if np.isfinite(e.cost_s) else ""
-                rec = backed(e)
-                status = f" — confirmed: {rec['kind']} recorded by the simulator" if rec else " — candidate"
+                rec, said = backed(e), verdict(e)
+                status = (f" — confirmed: {rec['kind']} recorded by the simulator" if rec else
+                          f" — confirmed on review by {said.get('author') or 'a reviewer'}" if said.get("verdict") == "confirmed" else
+                          f" — rejected on review by {said.get('author') or 'a reviewer'}" if said.get("verdict") == "rejected" else
+                          " — candidate") + (f" (note: {said['note']})" if said.get("note") else "")
                 evidence.append(f"Lap {e.lap}, {e.corner} {e.phase} at {e.peak_m:.0f} m: {e.severity} {e.cause}{lock}, "
                                 f"{e.duration_s:.1f} s at {e.speed:.0f} km/h{paid}{status}")
             busiest = ev["corner"].value_counts()
             out.append(_finding(
                 (f"{len(ev)} balance-incident candidates inferred from the steering, most of them in {busiest.index[0]}"
-                 + (f" — {n_conf} confirmed by a simulator record" if n_conf else " — none confirmed")), evidence,
+                 + (f" — {n_conf} confirmed" if n_conf else " — none confirmed")
+                 + (f", {rejected} rejected on review" if rejected else "")), evidence,
                 calc + " These are inferred candidates: a recorded incident (the simulator's own) on the same lap and "
-                "in the same corner confirms one; otherwise it is for review.",
+                "in the same corner confirms one, as does a person's verdict in the app's event review; a candidate "
+                "rejected on review is listed as such and kept, with the event as detected.",
                 c.conf(uses=("acc_lat", "speed"),
                        caps=[("medium", "checked against staged incidents and one simulator session, not against a driver's notes")]),
                 f"Start with {busiest.index[0]} ({busiest.iloc[0]} incidents). "
@@ -1403,6 +1467,7 @@ def analyse(session, corner_result: dict | None = None, handling_result: dict | 
                "not_assessed": [s["title"] for s in sections if not s["findings"]],
                "gain_s": (round(c.best_time - c.ideal, 3) if c.summary is not None and np.isfinite(c.best_time - c.ideal)
                           else None),
+               "gain_basis": "estimate: best lap minus the ideal lap by corner, a composite of several laps",
                "priorities": priorities}
     out = _plain({"sections": sections, "summary": summary})
     for key in ("best_lap_s", "ideal_lap_s"):
@@ -1441,6 +1506,8 @@ def to_text(report: dict) -> str:
             lines.append(f"  Partly assessed: {sec['note']}.")
         for n, f in enumerate(sec["findings"], 1):
             lines.append(f"  {n}. {f['conclusion']}{_worth(f, '  (', ')')}")
+            if f.get("nature"):
+                lines.append(f"     {NATURE_TEXT[f['nature']]}")
             lines += [f"     Evidence        {e}" if i == 0 else f"                     {e}" for i, e in enumerate(f["evidence"])]
             lines.append(f"     Calculation     {f['calculation']}")
             lines.append(f"     Confidence      {f['confidence']['level']} — {f['confidence']['basis']}")
@@ -1457,7 +1524,10 @@ def to_markdown(report: dict, title: str = "Performance engineering report") -> 
         if sec["not_assessed"] or sec["note"]:
             lines += [f"*{'Not' if sec['not_assessed'] else 'Partly'} assessed: {sec['not_assessed'] or sec['note']}.*", ""]
         for f in sec["findings"]:
-            lines += [f"### {f['conclusion']}{_worth(f, ' — ', '')}", "", "**Evidence**", ""]
+            lines += [f"### {f['conclusion']}{_worth(f, ' — ', '')}", ""]
+            if f.get("nature"):
+                lines += [f"*{NATURE_TEXT[f['nature']]}*", ""]
+            lines += ["**Evidence**", ""]
             lines += [f"- {e}" for e in f["evidence"]]
             lines += ["", f"**Calculation.** {f['calculation']}", "",
                       f"**Confidence: {f['confidence']['level']}.** {f['confidence']['basis'][0].upper() + f['confidence']['basis'][1:]}.", "",
