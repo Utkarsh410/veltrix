@@ -184,6 +184,8 @@ read the numbers, note, report) without leaving the app, on a real display.
 
 ### Phase 8 — MF4/MDF and professional data ingestion (High)
 
+**Status, 2026-10-19:** exports built (`exports.py`, `veltrix export`: CSV with a units row, Parquet with units per column, MF4) and checked to import back to the same laps. **Waiting on data:** a real logger's MF4; a MoTeC `.ld` writer is not built because whether i2 opens it cannot be checked here.
+
 **There:** lazy MF4 reader, channel picker, cancel and progress, damaged-file
 errors, profiles; tested on generated files only.
 
@@ -199,6 +201,8 @@ errors, profiles; tested on generated files only.
 profile, and the exported `.ld` opens in MoTeC i2.
 
 ### Phase 9 — Video synchronisation (High)
+
+**Status, 2026-10-19:** waiting — assisted sync (GPS / audio / a visible event) needs real footage to build against.
 
 **There:** anchors, drift fit, multiple cameras, the cursor driving the video and
 back; tested on synthetic video.
@@ -216,6 +220,8 @@ back; tested on synthetic video.
 a full stint, and a corner clip with overlay exports in one action.
 
 ### Phase 10 — Advanced vehicle dynamics (High)
+
+**Status, 2026-10-19:** built — wheel slip ratio, damper speed (the file's own when it logs one, else estimated), roll and pitch at the dampers, front and rear tyre slip angles; two vehicle-balance findings. Checked on the Spa `.ibt`: slip angles' front−rear per g (+0.64°) agrees with the steering-based understeer gradient (+0.79°); the file's damper speed is used. **Open:** aero and ride height; validation on a real car.
 
 **There:** steady-state steering model and understeer gradient, body slip,
 damper roll per g, plausibility of g peaks, Pacejka and ARB models.
@@ -236,6 +242,8 @@ setup values or a published test), and the report states its assumptions.
 
 ### Phase 11 — Driver performance and coaching (High)
 
+**Status, 2026-10-19:** coaching cards built (`analysis/coaching.py`, `veltrix coach`, printable page). **Open:** a reference lap from another driver; progress over sessions (needs phase 14); a coach's check on a real session.
+
 **There:** driver findings (coasting, overlap, consistency, braking repeatability),
 braking points from the turn-in, the corner-by-corner lap comparison.
 
@@ -252,6 +260,8 @@ agrees is right on a real session.
 
 ### Phase 12 — Setup and vehicle-performance analysis (High)
 
+**Status, 2026-10-19:** built — iRacing setup sheet read in full; `analysis/ab.py` and `veltrix compare` give better / worse / no detectable change per lap and corner against the scatter. **Open:** ACC setup files; a setup history per car; checking a verdict on a real pair of sessions with one recorded change.
+
 **There:** evidence-gated setup hypotheses; iRacing setup read for weight and
 mass.
 
@@ -266,6 +276,8 @@ mass.
 worse, no detectable change) with its confidence, checked on a real pair.
 
 ### Phase 13 — Reporting and engineering deliverables (High)
+
+**Status, 2026-10-19:** built — `report/documents.py` (debrief, driver card, comparison — static, A4), PDF through Qt WebEngine (`report/pdf.py`), repeatable specs (`veltrix document … --save-spec`, `--spec`); a spec builds the same page byte for byte.
 
 **There:** HTML report with evidence chains, data and limits tab, Markdown and
 text; Report.app.

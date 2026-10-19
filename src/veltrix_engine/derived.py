@@ -19,6 +19,7 @@ from .vehicle import G, VehicleParams
 
 CORNERING_G = 0.3     # oversteer metric is only defined above this lateral g
 LLTD_MIN_G = 0.5      # load transfer split is only reported above this lateral g
+SLIP_MIN_KMH = 30.0   # wheel slip is only worked out above this speed
 SUSTAIN_S = 0.25      # sustained acceleration: the median over this long, centred
 COARSE_SPEED_CUTOFF_HZ = 2.0    # d(speed)/dt filter when speed is recorded in coarse steps
 ROLL_CUTOFF_HZ = 5.0            # bandwidth of lateral g rebuilt from damper roll
@@ -216,6 +217,30 @@ def compute_derived(channels: pd.DataFrame, fs_hz: float, vehicle: VehicleParams
     elif not has("acc_lat"):
         notes.append("No lateral acceleration channel — balance, load transfer and grip "
                      "utilisation are not computed.")
+    # ── vehicle dynamics ──────────────────────────────────────────────────────
+    if has("speed"):
+        v_kmh = arr("speed")
+        for c in CORNERS:
+            if has(f"wheel_speed_{c}"):
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    out[f"slip_ratio_{c}"] = np.where(v_kmh > SLIP_MIN_KMH, (arr(f"wheel_speed_{c}") - v_kmh) / v_kmh, np.nan)
+    for c in CORNERS:
+        if has(f"susp_travel_{c}") and not has(f"damper_vel_{c}"):
+            out[f"damper_vel_{c}_est"] = lowpass(np.gradient(arr(f"susp_travel_{c}"), dt), 20.0, fs_hz)
+    if has(*[f"susp_travel_{c}" for c in CORNERS]):
+        fl, fr, rl, rr = (lowpass(arr(f"susp_travel_{c}"), 10.0, fs_hz) for c in CORNERS)
+        out["roll_front_deg"] = np.degrees(np.arctan((fr - fl) / 1000.0 / p.track_front_m))
+        out["roll_rear_deg"] = np.degrees(np.arctan((rr - rl) / 1000.0 / p.track_rear_m))
+        out["pitch_deg"] = np.degrees(np.arctan(((fl + fr) - (rl + rr)) / 2.0 / 1000.0 / p.wheelbase_m))
+    if has("vel_x", "vel_y", "yaw_rate", "steering"):
+        vx, vy, r = arr("vel_x"), arr("vel_y"), arr("yaw_rate")
+        a = p.wheelbase_m * (1.0 - p.front_weight_dist)            # CG to the front axle
+        b = p.wheelbase_m * p.front_weight_dist                    # CG to the rear axle
+        delta = np.radians(arr("steering") / p.steer_ratio)
+        moving = vx > 5.0
+        out["slip_angle_front_deg"] = np.where(moving, np.degrees(delta - np.arctan2(vy + a * r, vx)), np.nan)
+        out["slip_angle_rear_deg"] = np.where(moving, np.degrees(-np.arctan2(vy - b * r, vx)), np.nan)
+
     lat_id = "acc_lat_rebuilt" if "acc_lat_rebuilt" in out else "acc_lat" if has("acc_lat") else None
     if lat_id:
         # what the tyres hold, not the jolt of a kerb: a quarter of a second's median

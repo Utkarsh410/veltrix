@@ -204,6 +204,8 @@ def _build() -> dict:
             aliases=_corner_aliases(("tyre press", "tire press", "tyre pressure", "tire pressure",
                                      "tyre pres", "tire pres"), c),
             exclude=frozenset({"temp", "temperature"})))
+        defs.append(ChannelDef(f"damper_vel_{c}", "mm/s", f"Damper speed {c.upper()}, as the logger or "
+                               "simulator measures it; +ve in compression (bump)"))
         defs.append(ChannelDef(
             f"susp_travel_{c}", "mm", f"Suspension travel {c.upper()}", "length",
             sign="+ve in compression",
@@ -214,6 +216,24 @@ def _build() -> dict:
     derived = [
         ChannelDef("lap_distance", "m", "Distance from the start/finish line, scaled to the common "
                    "lap length", kind="derived", requires=("time",)),
+        *[ChannelDef(f"slip_ratio_{c}", "-", f"Longitudinal slip of the {c.upper()} wheel: (wheel speed − car "
+                     "speed) / car speed, above 30 km/h; + spinning, − locking", kind="derived",
+                     requires=("speed", f"wheel_speed_{c}")) for c in CORNERS],
+        *[ChannelDef(f"damper_vel_{c}_est", "mm/s", f"Damper speed {c.upper()} from d(travel)/dt, 20 Hz low-pass — "
+                     "an estimate, made only when the file does not log damper speed", kind="derived",
+                     requires=(f"susp_travel_{c}",)) for c in CORNERS],
+        ChannelDef("roll_front_deg", "deg", "Roll angle at the front dampers: atan((right − left travel) / front "
+                   "track); + when the right side is compressed (left-hand corner). Damper travel, not wheel travel",
+                   kind="derived", requires=("susp_travel_fl", "susp_travel_fr")),
+        ChannelDef("roll_rear_deg", "deg", "Roll angle at the rear dampers, as the front", kind="derived",
+                   requires=("susp_travel_rl", "susp_travel_rr")),
+        ChannelDef("pitch_deg", "deg", "Pitch: atan((front − rear mean travel) / wheelbase); + nose down",
+                   kind="derived", requires=("susp_travel_fl", "susp_travel_fr", "susp_travel_rl", "susp_travel_rr")),
+        ChannelDef("slip_angle_front_deg", "deg", "Front tyre slip angle: road-wheel steer angle − atan((vy + a·r) / vx), "
+                   "a = CG to front axle; + in a left-hand corner", kind="derived",
+                   requires=("vel_x", "vel_y", "yaw_rate", "steering")),
+        ChannelDef("slip_angle_rear_deg", "deg", "Rear tyre slip angle: −atan((vy − b·r) / vx), b = CG to rear axle",
+                   kind="derived", requires=("vel_x", "vel_y", "yaw_rate")),
         ChannelDef("body_slip", "deg", "Body slip angle: the angle between where the car points and where it "
                    "travels, atan(vel_y / vel_x), above 5 m/s", kind="derived", requires=("vel_x", "vel_y")),
         ChannelDef("acc_lat_sustained", "g", "Lateral acceleration held for a quarter of a second (rolling median "

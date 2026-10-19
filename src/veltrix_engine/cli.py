@@ -71,6 +71,66 @@ def _load(args):
                         units=units, dbc=args.dbc or None, cars=cars)
 
 
+def export(args) -> int:
+    from .exports import export_session
+    s = _load(args)
+    out = export_session(s, args.output, args.channels)
+    print(f"Written {out} ({out.stat().st_size / 1024:.0f} KB, {len(s.channels):,} samples)")
+    return 0
+
+
+def document(args) -> int:
+    from .report import documents
+    if args.spec:
+        spec = documents.load_spec(args.spec)
+    else:
+        if not args.template:
+            raise ValueError("Name a template (debrief, driver-card, comparison) or give --spec.")
+        spec = documents.make_spec(args.template, args.files, args.title, args.change, not args.no_app_data)
+    page = documents.build(spec)
+    out = Path(args.output or f"{file_stem(spec['files'][0])}_{spec['template']}.html")
+    out.write_text(page, encoding="utf-8")
+    print(f"Written to {out}")
+    if args.save_spec:
+        print(f"Spec saved to {documents.save_spec(spec, args.save_spec)}")
+    if args.pdf:
+        from .report.pdf import html_to_pdf
+        try:
+            print(f"PDF written to {html_to_pdf(page, args.pdf)}")
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+    return 0
+
+
+def coach(args) -> int:
+    from .analysis import coaching
+    s = _load(args)
+    result = coaching.cards(s)
+    text = coaching.to_markdown(result, f"Driver coaching — {Path(args.file).name}")
+    print(text)
+    if args.markdown:
+        Path(args.markdown).write_text(text, encoding="utf-8")
+    if args.html:
+        Path(args.html).write_text(coaching.to_html(result, f"Driver coaching — {Path(args.file).name}"), encoding="utf-8")
+        print(f"Cards written to {args.html}")
+    return 0
+
+
+def compare(args) -> int:
+    from .analysis import ab
+    a = _load(args)
+    other = argparse.Namespace(**{**vars(args), "file": args.other})
+    b = _load(other)
+    result = ab.compare_sessions(a, b, args.change)
+    text = ab.to_markdown(result)
+    print(text)
+    if args.markdown:
+        Path(args.markdown).write_text(text, encoding="utf-8")
+        print(f"Written to {args.markdown}")
+    return 0 if result["comparable"] else 2
+
+
 def car(args) -> int:
     from .cars import PARAMETERS, CarLibrary
     from .user_data import data_dir
@@ -545,6 +605,41 @@ def main(argv=None) -> int:
     c.add_argument("--name", help="circuit name (default: the venue in the file)")
     c.add_argument("--force", action="store_true", help="replace an existing circuit file")
     c.set_defaults(func=circuit)
+
+    ex = sub.add_parser("export", help="write a session for other tools: .csv, .parquet or .mf4")
+    import_options(ex)
+    ex.add_argument("output", help="the file to write; its extension picks the format")
+    ex.add_argument("--channels", nargs="*", help="only these channels (time, lap and lap distance always come)")
+    ex.add_argument("--no-app-data", action="store_true", help="ignore the app's car library")
+    ex.set_defaults(func=export)
+
+    doc = sub.add_parser("document", help="an engineering document to print or send: debrief, driver-card or comparison")
+    doc.add_argument("template", nargs="?", choices=("debrief", "driver-card", "comparison"))
+    doc.add_argument("files", nargs="*", help="the session (two for a comparison: before, after)")
+    doc.add_argument("-o", "--output", metavar="FILE", help="the HTML page (default: <file>_<template>.html)")
+    doc.add_argument("--pdf", metavar="FILE", help="also print it to a PDF")
+    doc.add_argument("--title", default="")
+    doc.add_argument("--change", default="", help="comparison: what was changed, if the files do not record it")
+    doc.add_argument("--spec", metavar="FILE", help="build from a saved spec instead")
+    doc.add_argument("--save-spec", metavar="FILE", help="save the spec, to build the same document again")
+    doc.add_argument("--no-app-data", action="store_true", help="ignore the app's car library")
+    doc.set_defaults(func=document)
+
+    co = sub.add_parser("coach", help="coaching cards: per corner, what the fastest pass did and what to try")
+    import_options(co)
+    co.add_argument("--html", metavar="FILE", help="write the cards as a page to print or send")
+    co.add_argument("--markdown", metavar="FILE", help="also write them as Markdown")
+    co.add_argument("--no-app-data", action="store_true", help="ignore the app's car library")
+    co.set_defaults(func=coach)
+
+    cmp_ = sub.add_parser("compare", help="session B against session A: did one change make the car faster?")
+    cmp_.add_argument("file", help="session A (before the change)")
+    cmp_.add_argument("other", help="session B (after it)")
+    cmp_.add_argument("--change", default="", help="what was changed, if the files do not record it")
+    cmp_.add_argument("--markdown", metavar="FILE", help="also write the comparison as Markdown")
+    cmp_.add_argument("--flip", nargs="*"); cmp_.add_argument("--unit", nargs="*"); cmp_.add_argument("--rate", type=float)
+    cmp_.add_argument("--dbc", nargs="*"); cmp_.add_argument("--no-app-data", action="store_true")
+    cmp_.set_defaults(func=compare)
 
     k = sub.add_parser("car", help="the car library: a car's parameters, entered once, used for every session of it")
     k.add_argument("action", choices=("list", "show", "set", "remove"))

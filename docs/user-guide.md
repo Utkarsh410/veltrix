@@ -276,6 +276,29 @@ Braking points in the engineering report are given the way a driver reads them o
 corner" — or "into the corner" when the brakes go on after the car has started to turn. Turn-in is one
 fixed point per corner, taken from a typical lap.
 
+## Coaching cards, comparisons and documents
+
+    veltrix coach SESSION --html cards.html
+    veltrix compare BEFORE AFTER --change "rear bar +1"
+    veltrix document debrief SESSION -o debrief.html --pdf debrief.pdf --save-spec debrief.json
+    veltrix document driver-card SESSION --pdf card.pdf
+    veltrix document comparison BEFORE AFTER --change "rear bar +1" --pdf change.pdf
+    veltrix document --spec debrief.json          # the same document again
+    veltrix export SESSION out.csv                # or .parquet, .mf4
+
+- **Coaching cards**: one per corner where your fastest pass was clearly
+  quicker than your usual one — the braking point, release, minimum speed,
+  throttle-on and exit speed of both, measured from the corner's turn-in and
+  apex, and what to try. A pass with a recorded incident is never the one to copy.
+- **Comparison**: session B against session A. What changed is read from the
+  files where they record it (an iRacing setup) or stated with `--change`. The
+  lap and every corner come out faster, slower, probably either, or *no
+  detectable change* — decided by each session's own lap-to-lap scatter, not by
+  how big the difference looks.
+- **Documents**: a debrief, a driver card or a comparison as a page to print,
+  and as a PDF. A saved spec builds exactly the same document again.
+- **Export**: the session's channels with their units, for other tools.
+
 ## The car library
 
 Several figures need the car's own numbers — wheelbase, steering ratio, mass,

@@ -48,13 +48,43 @@ CHANNELS = {
                   "Combined g as a share of the car's reference grip envelope"),
 }
 
+CHANNELS.update({
+    "slip_ratio_fl": ('when(speed > 30, (wheel_speed_fl - speed) / speed)',
+                'Longitudinal slip of the FL wheel above 30 km/h: + spinning, − locking'),
+    "damper_vel_fl_est": ('lowpass(derivative(susp_travel_fl), 20, order=4, cap=1, uniform=1)',
+                'Damper speed FL from d(travel)/dt — only when the file does not log it'),
+    "slip_ratio_fr": ('when(speed > 30, (wheel_speed_fr - speed) / speed)',
+                'Longitudinal slip of the FR wheel above 30 km/h: + spinning, − locking'),
+    "damper_vel_fr_est": ('lowpass(derivative(susp_travel_fr), 20, order=4, cap=1, uniform=1)',
+                'Damper speed FR from d(travel)/dt — only when the file does not log it'),
+    "slip_ratio_rl": ('when(speed > 30, (wheel_speed_rl - speed) / speed)',
+                'Longitudinal slip of the RL wheel above 30 km/h: + spinning, − locking'),
+    "damper_vel_rl_est": ('lowpass(derivative(susp_travel_rl), 20, order=4, cap=1, uniform=1)',
+                'Damper speed RL from d(travel)/dt — only when the file does not log it'),
+    "slip_ratio_rr": ('when(speed > 30, (wheel_speed_rr - speed) / speed)',
+                'Longitudinal slip of the RR wheel above 30 km/h: + spinning, − locking'),
+    "damper_vel_rr_est": ('lowpass(derivative(susp_travel_rr), 20, order=4, cap=1, uniform=1)',
+                'Damper speed RR from d(travel)/dt — only when the file does not log it'),
+    "roll_front_deg": ('atan2(lowpass(susp_travel_fr, 10, order=4, cap=1, uniform=1) - lowpass(susp_travel_fl, 10, order=4, cap=1, uniform=1), ($track_front_m as m)) in deg',
+                'Roll at the front dampers; + right side compressed'),
+    "roll_rear_deg": ('atan2(lowpass(susp_travel_rr, 10, order=4, cap=1, uniform=1) - lowpass(susp_travel_rl, 10, order=4, cap=1, uniform=1), ($track_rear_m as m)) in deg',
+                'Roll at the rear dampers'),
+    "pitch_deg": ('atan2((lowpass(susp_travel_fl, 10, order=4, cap=1, uniform=1) + lowpass(susp_travel_fr, 10, order=4, cap=1, uniform=1) - lowpass(susp_travel_rl, 10, order=4, cap=1, uniform=1) - lowpass(susp_travel_rr, 10, order=4, cap=1, uniform=1)) / 2, ($wheelbase_m as m)) in deg',
+                'Pitch; + nose down'),
+    "slip_angle_front_deg": ('when(vel_x > 5, (steering / $steer_ratio - atan2(vel_y + ($wheelbase_m * (1 - $front_weight_dist) as m) * (yaw_rate / (1 as rad)), vel_x)) in deg)',
+                'Front tyre slip angle from the body velocities, yaw rate and steering'),
+    "slip_angle_rear_deg": ('when(vel_x > 5, (0 - atan2(vel_y - ($wheelbase_m * $front_weight_dist as m) * (yaw_rate / (1 as rad)), vel_x)) in deg)',
+                'Rear tyre slip angle'),
+})
+
 # derived channels no formula can express, and why
 NOT_A_FORMULA = {
     "acc_lat_rebuilt": "rebuilt from damper roll by a fit against the logged channel, only when lateral g is "
                        "recorded too coarsely — a calibration, not a formula",
 }
 
-PARAMETERS = ("steer_ratio", "wheelbase_m", "wheel_rate_front_N_mm", "wheel_rate_rear_N_mm", "grip_limit_g")
+PARAMETERS = ("steer_ratio", "wheelbase_m", "wheel_rate_front_N_mm", "wheel_rate_rear_N_mm", "grip_limit_g",
+              "front_weight_dist", "track_front_m", "track_rear_m")
 
 
 def standard_set(vehicle: VehicleParams | None = None) -> MathSet:

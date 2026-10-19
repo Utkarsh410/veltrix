@@ -455,6 +455,28 @@ All four priorities (P0–P3) of the user's improvement list are done.
 - Waiting on the user: circuit data (official numbers, names, boards), other simulators' files, a reference
   screenshot for an in-app car-settings screen; phase 7 views wait for references too.
 
+## Waves C and D — what was built, 2026-10-19
+
+- **Phase 12** `analysis/ab.py`: `compare_sessions(a, b, change)` — same circuit / car checks, setup changes from
+  the files (`RawTable.setup`, iRacing `setup_sheet`; results of running such as last hot pressures are not
+  settings), lap and per-corner verdicts (difference of means against the combined standard error: ≥ 2 real,
+  1–2 probably, below no detectable change), corner metrics of B measured on A's corners; `to_markdown`;
+  `veltrix compare A B --change`. Tests `tests/test_ab.py` (no change, +2% grip, too few laps, setup diff).
+- **Phase 11** `analysis/coaching.py`: cards per corner (usual against the fastest clean pass, references from
+  turn-in and apex, "Try" lines with the same limits as the driver tips, evidence, confidence), Markdown and
+  an A4 page; `veltrix coach`. Tests `tests/test_coaching.py`.
+- **Phase 10** `derived.py`: `slip_ratio_*`, `damper_vel_*_est` (only without the file's own `damper_vel_*`,
+  which iRacing gives as `*shockVel`), `roll_front_deg`, `roll_rear_deg`, `pitch_deg`, `slip_angle_front_deg`,
+  `slip_angle_rear_deg`; all also in `maths/builtin.py`. Vehicle-balance findings "In the corners the front
+  tyres work harder…" (checked against the steering gradient) and "Damper speeds, roll and pitch". Tests
+  `tests/test_dynamics.py` (Spa checks under `-m real`).
+- **Phase 13** `report/documents.py` (debrief, driver-card, comparison; static A4; foot names the source
+  files' SHA-256, no clock time), `report/pdf.py` (Qt WebEngine `printToPdf`, offscreen), specs
+  (`make_spec`, `save_spec`, `load_spec`, `build`); `veltrix document`. Tests `tests/test_documents.py`.
+- **Phase 8 (tooling)** `exports.py` (`export_session` → .csv / .parquet / .mf4); `veltrix export`. Tests
+  `tests/test_exports.py`. No `.ld` writer (cannot be checked against MoTeC i2 here).
+- Golden frozen outputs and real-session freezes updated: additions only (new channels; new balance findings).
+
 ## Open items carried forward
 
 | Item | Rule | Planned in |

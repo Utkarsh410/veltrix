@@ -82,6 +82,10 @@ def parse_ibt(data: bytes) -> RawTable:
     df = pd.DataFrame({name: rec[name].astype(float) for name, _, _ in fields})
     for name in fractions:                # 0-1 in the file, "%" on the label: make the label true
         df[name] = df[name] * 100.0
+    for corner in ("LF", "RF", "LR", "RR"):          # damper speed as the simulator computes it, m/s -> mm/s
+        if f"{corner}shockVel" in df:
+            df[f"{corner}shockVel"] = df[f"{corner}shockVel"] * 1000.0
+            units[f"{corner}shockVel"] = "mm/s"
     if "PlayerTrackSurfaceMaterial" in df:
         # irsdk_TrkSurf: 11-14 are the four rumble-strip materials (kerbs)
         material = df["PlayerTrackSurfaceMaterial"]
@@ -119,6 +123,7 @@ def parse_ibt(data: bytes) -> RawTable:
             if f"{wheel.upper()}temp{tag}" in df:
                 hints[f"tyre_temp_{cid}_{zone}"] = f"{wheel.upper()}temp{tag}"
         for cid_base, col in ((f"wheel_speed_{cid}", f"{wheel.upper()}speed"),
+                              (f"damper_vel_{cid}", f"{wheel.upper()}shockVel"),
                               (f"susp_travel_{cid}", f"{wheel.upper()}shockDefl"),
                               (f"tyre_press_{cid}", f"{wheel.upper()}pressure")):
             if col in df:
@@ -136,7 +141,33 @@ def parse_ibt(data: bytes) -> RawTable:
     if "IsOnTrack" in df and not df["IsOnTrack"].all():
         off = 1 - float(df["IsOnTrack"].mean())
         notes.append(("info", f"The car is off track (garage or replay) for {off:.0%} of the file."))
-    return RawTable(df, units, info, format="iRacing .ibt", notes=notes, hints=hints, vehicle=vehicle)
+    return RawTable(df, units, info, format="iRacing .ibt", notes=notes, hints=hints, vehicle=vehicle,
+                    setup=setup_sheet(yaml))
+
+
+def setup_sheet(yaml: str) -> dict:
+    """The CarSetup section of the session info as a flat sheet:
+    {"Chassis.Front.ArbSetting": "3", "Chassis.LeftFront.CornerWeight": "3632 N", ...}.
+    The section is indented key: value lines with no lists, so indentation
+    alone gives the nesting."""
+    start = yaml.find("\nCarSetup:")
+    if start < 0:
+        return {}
+    out, path = {}, []
+    for line in yaml[start + 1:].splitlines()[1:]:
+        if not line.strip() or line.strip() == "...":
+            if line.strip() == "...":
+                break
+            continue
+        if not line.startswith(" "):                  # the next top-level section
+            break
+        depth = (len(line) - len(line.lstrip(" "))) - 1
+        key, _, value = line.strip().partition(":")
+        path = path[:depth] + [key.strip()]
+        value = value.strip()
+        if value and key.strip() != "UpdateCount":
+            out[".".join(path)] = value
+    return out
 
 
 def _setup_vehicle(yaml: str) -> dict:

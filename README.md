@@ -280,7 +280,7 @@ Foundation phase of the product plan:
 |---|---|
 | Audit of the existing toolkits | Done — [docs/AUDIT.md](docs/AUDIT.md) |
 | Canonical channel schema, units and sign conventions | Done — [docs/CHANNEL_SCHEMA.md](docs/CHANNEL_SCHEMA.md) |
-| Core calculations extracted and tested | Done — 406 tests |
+| Core calculations extracted and tested | Done — 429 tests |
 | Golden datasets with expected outputs | Done for synthetic and simulator data; **no real-car dataset yet** |
 | Tested on a full simulator session | Done — see below |
 | Lap detection, distance alignment, delta | Done |
