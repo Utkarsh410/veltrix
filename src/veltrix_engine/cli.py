@@ -133,16 +133,13 @@ def report(args) -> int:
     s = _load(args)
     extra = ""
     if not args.no_app_data:
-        # the maths channels, event rules and notes made in the desktop app belong in the report too
-        try:
-            from veltrix_app import extras
-            done = extras.apply(s, args.app_data)
-            made = sum(r.ok for r in done["maths"].values())
-            extra = f", {made} maths channel(s), {len(s.model.events)} candidate event(s), {done['notes']} note(s) from the app"
-            for line in done["problems"]:
-                print(f"Note: {line}", file=sys.stderr)
-        except ImportError:
-            pass
+        # the maths channels, event rules, notes and reviews made in the desktop app belong in the report too
+        from .user_data import apply as apply_user_data
+        done = apply_user_data(s, args.app_data)
+        made = sum(r.ok for r in done["maths"].values())
+        extra = f", {made} maths channel(s), {len(s.model.events)} candidate event(s), {done['notes']} note(s) from the app"
+        for line in done["problems"]:
+            print(f"Note: {line}", file=sys.stderr)
     out = write_report(s, args.output or f"{file_stem(args.file)}_report.html", title=args.title)
     warnings = len(s.warnings())
     print(f"Report written to {out}  ({out.stat().st_size / 1024:.0f} KB, {len(s.laps)} laps, "
@@ -521,6 +518,8 @@ def main(argv=None) -> int:
     p.add_argument("--export", metavar="DIR", help="also write the tables as CSV files")
     p.set_defaults(func=inspect)
     args = ap.parse_args(argv)
+    from .logs import setup as setup_log
+    setup_log()
     try:
         from . import thresholds as tuning
         with tuning.use(tuning.load(args.thresholds) if getattr(args, "thresholds", None) else None):

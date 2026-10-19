@@ -98,7 +98,7 @@ def test_a_workspace_reopens_and_survives_missing_channels(tmp_path, session):
     assert set(moved.missing()) >= {"acc_lat", "acc_long", "tyre_temp_fl_mid", "NotLogged"}
     data = json.loads(path.read_text())
     data["version"] = 99
-    with pytest.raises(ValueError, match="newer version"):
+    with pytest.raises(ValueError, match="newer release"):
         Workspace.from_dict(data)
 
 

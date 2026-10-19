@@ -1,0 +1,43 @@
+{
+ "version": 1,
+ "name": "saved workspace",
+ "charts": [
+  {
+   "channels": [
+    "speed"
+   ],
+   "title": ""
+  },
+  {
+   "channels": [
+    "throttle",
+    "brake"
+   ],
+   "title": ""
+  },
+  {
+   "channels": [
+    "steering"
+   ],
+   "title": ""
+  },
+  {
+   "channels": [
+    "acc_lat",
+    "acc_long"
+   ],
+   "title": ""
+  },
+  {
+   "channels": [
+    "rpm",
+    "gear"
+   ],
+   "title": ""
+  }
+ ],
+ "cursor": 0.0,
+ "view": null,
+ "compare": {},
+ "selection": null
+}

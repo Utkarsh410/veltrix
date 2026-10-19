@@ -276,6 +276,19 @@ Braking points in the engineering report are given the way a driver reads them o
 corner" — or "into the corner" when the brakes go on after the car has started to turn. Turn-in is one
 fixed point per corner, taken from a typical lap.
 
+## When something goes wrong
+
+A file that cannot be read gives a message naming the file and what is wrong
+with it. If the app hits an error it did not expect, it saves a crash report in
+its data folder (`crash_reports/`) and tells you where; it holds the error and
+the versions, no telemetry, and nothing is sent anywhere. What the app did —
+files read, how long it took, errors — is logged in `logs/veltrix.log` in the
+same folder (on a Mac: `~/Library/Application Support/Veltrix Data`).
+
+A file saved by a newer release of Veltrix (a workspace, notes, reviews, a
+project) is refused with a message rather than read in part, and is never
+overwritten.
+
 ## What is not there yet
 
 A real, signed app bundle (the launchers are tied to this folder).

@@ -1,0 +1,17 @@
+{
+ "version": 1,
+ "parameters": {
+  "k": 2.0
+ },
+ "channels": [
+  {
+   "name": "SpeedTimesK",
+   "formula": "speed * $k",
+   "unit": "km/h",
+   "description": "speed doubled",
+   "category": "maths",
+   "estimate": false,
+   "version": 1
+  }
+ ]
+}

@@ -79,6 +79,8 @@ class RuleSet:
 
     @classmethod
     def from_dict(cls, data: dict) -> "RuleSet":
+        from .versions import upgrade
+        data = upgrade("event rule set", data, RULES_VERSION)
         if data.get("version", 1) > RULES_VERSION:
             raise ValueError("These event rules were saved by a newer version of the engine.")
         rules = [Rule(**{**r, "evidence": tuple(r.get("evidence", ())), "fine_inputs": tuple(r.get("fine_inputs", ()))})
@@ -437,6 +439,7 @@ def limits_text(thresholds: dict) -> str:
 # ── review: a person's verdict, kept beside what was detected ─────────────────
 
 VERDICTS = ("confirmed", "rejected")
+REVIEWS_VERSION = 1
 MATCH_S = 1.0                 # a review belongs to an event of the same rule and kind starting this close
 
 
@@ -512,14 +515,21 @@ class ReviewStore:
         if not path.exists():
             return []
         try:
-            return list(json.loads(path.read_text(encoding="utf-8"))["reviews"])
-        except (ValueError, KeyError, TypeError):
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            return []
+        from .versions import upgrade
+        try:
+            return list(upgrade("set of event reviews", data, REVIEWS_VERSION)["reviews"])   # a newer file raises
+        except (KeyError, TypeError):
             return []
 
     def save(self, sha256: str, reviews: list) -> None:
+        from .versions import refuse_overwrite
         path = self._path(sha256)
+        refuse_overwrite(path, "set of event reviews", REVIEWS_VERSION)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"version": 1, "reviews": reviews}, indent=1), encoding="utf-8")
+        path.write_text(json.dumps({"version": REVIEWS_VERSION, "reviews": reviews}, indent=1), encoding="utf-8")
 
     def put(self, sha256: str, event: Event, verdict: str, note: str = "", author: str = "") -> dict:
         """Record (or replace) the review of one event; earlier verdicts go into its history."""

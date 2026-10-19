@@ -92,6 +92,8 @@ class MathSet:
 
     @classmethod
     def from_dict(cls, data: dict) -> "MathSet":
+        from ..versions import upgrade
+        data = upgrade("maths channel set", data, SET_VERSION)
         if data.get("version", 1) > SET_VERSION:
             raise ValueError("These maths channels were saved by a newer version of the engine.")
         out = cls()

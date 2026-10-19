@@ -113,7 +113,7 @@ def test_a_profile_saves_reloads_and_reproduces_a_confirmed_mapping(tmp_path):
     bad["rules"][0]["channel"] = "warp_factor"
     with pytest.raises(ValueError, match="not a channel this engine has"):
         Profile.from_dict(bad)
-    with pytest.raises(ValueError, match="newer version"):
+    with pytest.raises(ValueError, match="newer release"):
         Profile.from_dict({**back.to_dict(), "version": 9})
 
 

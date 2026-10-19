@@ -1,0 +1,34 @@
+# Every push and pull request runs the full test suite on macOS, the platform
+# the app is built for. The real sessions (pytest -m real) stay on the
+# developer's machine and are not run here.
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install the engine, the app and every format reader
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[ui,all,dev]"
+      - name: Run the tests
+        run: python -m pytest -o faulthandler_timeout=600 -p no:cacheprovider

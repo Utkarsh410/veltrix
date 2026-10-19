@@ -8,3 +8,9 @@ __pycache__/
 reports/
 *.app/
 ~$*
+
+# real sessions and what they gave are the user's: kept on this machine
+tests/real_expected/
+datasets/*.ibt
+datasets/*.ld
+datasets/*.ldx

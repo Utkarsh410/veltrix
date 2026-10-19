@@ -1,0 +1,6 @@
+{
+ "version": 1,
+ "thresholds": {
+  "engineering.LAPS_HIGH": 6
+ }
+}

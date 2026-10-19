@@ -18,13 +18,17 @@ done before its "done when" holds and its tests pass.
 
 ## Resume here
 
-Every phase of the brief has a working, tested slice. **The roadmap is not
-complete.** What remains, in the order worth doing it; start at the top.
+**From 2026-10-19 the plan is [development-plan.md](development-plan.md)**
+(phases 4–20, set by the user). Start with its wave A (phase 4); the items
+below are folded into it. Every phase of the brief has a working, tested slice,
+and the user's improvement list P0–P3 is done and pushed.
 
-**Settled by the user on 2026-10-13 (do not raise again until they do):**
-the desktop app works when used by hand; MoTeC `.ld` files run smoothly;
-real-car data, real video footage and a logger's MF4 are not available yet and
-validation against them waits until they are; no git commit is planned.
+**Settled by the user (do not raise again until they do):** the desktop app
+works when used by hand; MoTeC `.ld` files run smoothly; real-car data, real
+video footage and a logger's MF4 are not available yet and validation against
+them waits until they are. Since 2026-10-16 the work is in git
+(`origin` = github.com/Utkarsh410/veltrix, `main`); commit and push only when
+the user asks.
 
 **Next slices (no input needed):**
 
@@ -401,6 +405,28 @@ P3, done:
 - Tests: `tests/test_event_review.py`.
 
 All four priorities (P0–P3) of the user's improvement list are done.
+
+## Wave A (phase 4, development plan) — what was built, 2026-10-19
+
+- **CI**: `.github/workflows/tests.yml` — macOS 14, Python 3.12, `pip install -e ".[ui,all,dev]"`, offscreen
+  Qt, full suite on every push and pull request. Checked by a fresh environment built from the declared
+  dependencies only (387 passed, 5 skipped without the 264 MB file). Not yet run on GitHub.
+- **Real-session regression**: `tests/real_sessions.py` (Spa `.ibt`, Hungaroring `.ld`, Nürburgring CSV),
+  `tests/test_real_sessions.py` (marker `real`, `pytest -m real`, 10 s), `tools/freeze_real_sessions.py`
+  (prints what changed). Files and `tests/real_expected/` ignored by git (the plan's default).
+- **Module boundaries**: `tests/test_architecture.py` (engine ↛ app except `veltrix app`; analysis ↛
+  report/CLI; ≤ 900 lines). `user_data.py` moved into the engine (data folder, detect_events, notes,
+  reviews, saved rules, `apply`); `veltrix_app.events/extras/paths` re-export it. `analysis/engineering`
+  is a package (base, potential_driver, braking_cornering, traction_tyres, vehicle_balance, incidents,
+  setup, report). `thresholds.use` now reaches every loaded engine module's copy of a constant.
+  `veltrix_app/session_charts.py` (SessionCharts mixin) takes the charts out of `window.py`.
+- **Saved-file versions**: `versions.py` (`upgrade`, `refuse_overwrite`) in every reader and store
+  (maths, rules, profiles, workspaces, thresholds, notes, reviews, video links, session manifest, project
+  schema — which no longer rewrites a newer schema number). `tests/fixtures/saved_release_1/` from
+  `tools/freeze_saved_files.py`; `tests/test_saved_files.py`.
+- **Errors, log, crash reports**: `errors.py`; `read_file` wraps importer failures; `MappingError` for
+  missing channels; `logs.py` (rotating log in the data folder, set up by the app and the CLI);
+  `veltrix_app/crash.py` (local crash report, nothing sent).
 
 ## Open items carried forward
 

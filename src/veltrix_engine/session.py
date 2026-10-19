@@ -31,6 +31,7 @@ from .mapping import auto_map, validate_mapping
 from .model import SessionModel
 from .model_build import build_model
 from .schema import CANONICAL_UNIT, CHANNELS, UNIT_FACTORS
+from .errors import MappingError
 from .vehicle import VehicleParams
 
 REQUIRED = ("time", "speed")
@@ -162,7 +163,7 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
         decided_by.update({cid: "chosen at import" for cid in mapping})
     missing = [c for c in REQUIRED if c not in mapped and not (c == "time" and rate_hz)]
     if missing:
-        raise ValueError(
+        raise MappingError(
             f"{raw.source or 'file'}: required channel(s) not found: {missing}. "
             f"Columns: {list(raw.data.columns)[:20]}. Pass mapping={{channel: column}} to set them.")
 

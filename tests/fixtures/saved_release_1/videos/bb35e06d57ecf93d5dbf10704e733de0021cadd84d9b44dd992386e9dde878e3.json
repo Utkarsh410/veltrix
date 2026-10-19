@@ -1,0 +1,16 @@
+{
+ "version": 1,
+ "videos": [
+  {
+   "path": "onboard.mp4",
+   "camera": "roll hoop",
+   "offset": 12.5,
+   "rate": 1.0,
+   "method": "manual",
+   "piecewise": false,
+   "anchors": [],
+   "tolerance_s": 0.1,
+   "metadata": {}
+  }
+ ]
+}

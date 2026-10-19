@@ -33,4 +33,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not real'"
+markers = ["real: regression on the real sessions kept on this machine (run with -m real)"]

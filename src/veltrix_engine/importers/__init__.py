@@ -21,7 +21,9 @@ from __future__ import annotations
 import gzip
 import hashlib
 import importlib.util
+import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +33,10 @@ from . import aim, can, dbc, iracing, mat, mdf, motec, vbox
 from .csv_importer import parse_csv_text, read_csv
 from .dbc import Dbc, read_dbc
 from .table import RawTable, Signal, signals_to_table
+from ..errors import FileFormatError, VeltrixError
+from .mdf import ImportCancelled
+
+log = logging.getLogger("veltrix.import")
 
 __all__ = ["inspect_file", "FORMATS", "Dbc", "RawTable", "Signal", "detect_format", "parse_csv_text", "read_csv", "read_dbc",
            "read_file", "signals_to_table", "supported_extensions", "supported_formats"]
@@ -206,7 +212,30 @@ def read_file(path: str | Path, dbc=None, channels=None, progress=None, cancel=N
     channels, progress, cancel: for MDF files, which are read lazily — the
          channel names to load (default all), a progress(done, total)
          callback, and a cancel() callback that stops the import when it
-         returns True. Other formats are read whole and ignore them."""
+         returns True. Other formats are read whole and ignore them.
+
+    A file that cannot be read raises FileFormatError naming the file and what
+    was wrong; whatever an importer tripped over on a damaged file is turned
+    into that, with the details in the log. A missing file raises OSError and a
+    cancelled MDF import ImportCancelled, as before."""
+    started = time.perf_counter()
+    try:
+        table = _read_file(path, dbc, channels, progress, cancel)
+    except (VeltrixError, OSError, ImportCancelled, KeyboardInterrupt):
+        raise
+    except ValueError as e:
+        log.info("could not read %s: %s", path, e)
+        text = str(e)
+        raise FileFormatError(text if text.startswith(Path(path).name) else f"{Path(path).name}: {text}") from e
+    except Exception as e:                    # an untrusted file can trip any parser in any way
+        log.exception("reading %s failed", path)
+        raise FileFormatError(f"{Path(path).name} could not be read: it looks damaged, or is a version of its "
+                              f"format this release does not know ({type(e).__name__}: {e}).") from e
+    log.info("read %s as %s in %.2f s", path, table.format, time.perf_counter() - started)
+    return table
+
+
+def _read_file(path, dbc=None, channels=None, progress=None, cancel=None) -> RawTable:
     path = Path(path)
     with open(path, "rb") as f:
         head = f.read(65536)
@@ -224,7 +253,7 @@ def read_file(path: str | Path, dbc=None, channels=None, progress=None, cancel=N
         with gzip.open(path, "rb") as f:
             head = f.read(65536)
     if not head:
-        raise ValueError(f"{path.name} is empty.")
+        raise FileFormatError(f"{path.name} is empty.")
     kind = detect_format(name, head)
     if kind == "csv":                         # parsed straight from the file: never held in memory as text
         table = read_csv(path)

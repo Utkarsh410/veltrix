@@ -38,6 +38,8 @@ from .model_store import MANIFEST, load_model, save_model
 from .session import Session, load_session
 from .vehicle import VehicleParams
 
+from .errors import VersionError
+
 SCHEMA_VERSION = 3          # 2: session.format   3: sessions/<id>/model/ (files only; no table change)
 
 _DDL = """
@@ -112,10 +114,19 @@ class ProjectStore:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(_DDL)
-        if "format" not in {row["name"] for row in self.db.execute("PRAGMA table_info(session)")}:
-            self.db.execute("ALTER TABLE session ADD COLUMN format TEXT")
+        row = self.db.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+        found = int(row["value"]) if row else SCHEMA_VERSION      # a new project starts at the current schema
+        if found > SCHEMA_VERSION:
+            self.db.close()
+            raise VersionError(f"This project was saved by a newer release of Veltrix (schema {found}); this release "
+                               f"reads up to schema {SCHEMA_VERSION}. Update Veltrix to open it — it has not been changed.")
+        # one step at a time from the project's own schema to this release's
+        if "format" not in {r["name"] for r in self.db.execute("PRAGMA table_info(session)")}:
+            self.db.execute("ALTER TABLE session ADD COLUMN format TEXT")        # schema 2
+        # schema 3 changed only files (sessions/<id>/model/), made on demand by model()
         self.db.execute("INSERT OR REPLACE INTO meta VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
         self.db.commit()
+        self.schema_found = found
 
     def close(self) -> None:
         self.db.close()

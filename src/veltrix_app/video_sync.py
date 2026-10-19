@@ -44,6 +44,9 @@ from pathlib import Path
 import numpy as np
 
 VERSION = 1
+
+from veltrix_engine.errors import VersionError  # noqa: E402
+from veltrix_engine.versions import refuse_overwrite, upgrade  # noqa: E402
 DISAGREE_S = 0.10          # anchors further than this from the fit are flagged (configurable per link)
 DRIFT_MIN_SPAN_S = 60.0    # anchors must cover at least this much video before drift is considered
 DRIFT_GAIN = 0.5           # ... and fitting a rate must cut the residual by at least this share
@@ -217,11 +220,17 @@ class VideoStore:
     def load(self, sha256: str) -> list:
         try:
             path = self._path(sha256)
-            return [VideoLink.from_dict(v) for v in json.loads(path.read_text(encoding="utf-8"))["videos"]] if path.exists() else []
+            if not path.exists():
+                return []
+            data = upgrade("set of video links", json.loads(path.read_text(encoding="utf-8")), VERSION)   # newer: raises
+            return [VideoLink.from_dict(v) for v in data["videos"]]
+        except VersionError:
+            raise
         except (ValueError, KeyError, TypeError):
             return []
 
     def save(self, sha256: str, links: list) -> None:
         path = self._path(sha256)
         self.folder.mkdir(parents=True, exist_ok=True)
+        refuse_overwrite(path, "set of video links", VERSION)
         path.write_text(json.dumps({"version": VERSION, "videos": [v.to_dict() for v in links]}, indent=1), encoding="utf-8")

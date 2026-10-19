@@ -1,0 +1,207 @@
+{
+ "version": 1,
+ "parameters": {
+  "min_speed": 40.0,
+  "spin_throttle": 70.0,
+  "spin_on": 8.0,
+  "spin_off": 4.0,
+  "lock_brake_g": 0.5,
+  "lock_on": 14.0,
+  "lock_off": 6.0,
+  "loss_lat_g": 0.8,
+  "over_metric": 0.35,
+  "overlap_throttle": 25.0,
+  "overlap_brake_g": 0.4,
+  "correction_rate": 400.0,
+  "glitch_g": 6.0
+ },
+ "helpers": {
+  "FrontWheelSpeed": "(wheel_speed_fl + wheel_speed_fr) / 2",
+  "RearWheelSpeed": "(wheel_speed_rl + wheel_speed_rr) / 2",
+  "RearSlipEstimate": "if(speed > $min_speed, (RearWheelSpeed - FrontWheelSpeed) / speed * 100, 0)",
+  "FrontLockEstimate": "if(speed > $min_speed, (speed - min(wheel_speed_fl, wheel_speed_fr)) / speed * 100, 0)",
+  "SpeedChangeG": "abs(derivative(speed in m/s) in g)"
+ },
+ "rules": [
+  {
+   "id": "wheelspin",
+   "title": "Possible wheelspin",
+   "on": "throttle > $spin_throttle and RearSlipEstimate > $spin_on",
+   "off": "RearSlipEstimate < $spin_off or throttle < $spin_throttle",
+   "min_duration_s": 0.15,
+   "merge_gap_s": 0.3,
+   "severity": "RearSlipEstimate",
+   "moderate": 12.0,
+   "severe": 20.0,
+   "evidence": [
+    "throttle",
+    "RearSlipEstimate",
+    "speed"
+   ],
+   "fine_inputs": [],
+   "confidence": "medium",
+   "note": "A rear tyre of smaller rolling radius, or a kerb, gives the same reading.",
+   "version": 1,
+   "enabled": true,
+   "calibrate": {
+    "parameter": "spin_on",
+    "signal": "RearSlipEstimate",
+    "quiet": "throttle < 20 and speed > $min_speed",
+    "sigmas": 6.0,
+    "off": "spin_off",
+    "off_ratio": 0.5
+   }
+  },
+  {
+   "id": "lock_up",
+   "title": "Possible front lock-up",
+   "on": "acc_long_calc < -$lock_brake_g and FrontLockEstimate > $lock_on",
+   "off": "FrontLockEstimate < $lock_off",
+   "min_duration_s": 0.1,
+   "merge_gap_s": 0.3,
+   "severity": "FrontLockEstimate",
+   "moderate": 20.0,
+   "severe": 40.0,
+   "evidence": [
+    "FrontLockEstimate",
+    "speed",
+    "acc_long_calc"
+   ],
+   "fine_inputs": [],
+   "confidence": "medium",
+   "note": "Vehicle speed taken from a wheel that is itself locking hides the lock-up.",
+   "version": 1,
+   "enabled": true,
+   "calibrate": {
+    "parameter": "lock_on",
+    "signal": "FrontLockEstimate",
+    "quiet": "acc_long_calc > -0.1 and speed > $min_speed",
+    "sigmas": 6.0,
+    "off": "lock_off",
+    "off_ratio": 0.5
+   }
+  },
+  {
+   "id": "traction_loss",
+   "title": "Possible traction loss",
+   "on": "throttle > $spin_throttle and RearSlipEstimate > $spin_on and abs(acc_lat) > $loss_lat_g",
+   "off": "RearSlipEstimate < $spin_off",
+   "min_duration_s": 0.15,
+   "merge_gap_s": 0.3,
+   "severity": "RearSlipEstimate",
+   "moderate": 12.0,
+   "severe": 20.0,
+   "evidence": [
+    "RearSlipEstimate",
+    "acc_lat",
+    "steering",
+    "throttle"
+   ],
+   "fine_inputs": [],
+   "confidence": "low",
+   "note": "Wheelspin while cornering; whether the rear stepped out needs the steering trace or the video.",
+   "version": 1,
+   "enabled": true,
+   "calibrate": {}
+  },
+  {
+   "id": "oversteer",
+   "title": "Possible oversteer",
+   "on": "speed > $min_speed and oversteer_metric > $over_metric",
+   "off": "",
+   "min_duration_s": 0.25,
+   "merge_gap_s": 0.3,
+   "severity": "oversteer_metric",
+   "moderate": 0.5,
+   "severe": 0.8,
+   "evidence": [
+    "oversteer_metric",
+    "steering",
+    "acc_lat",
+    "speed"
+   ],
+   "fine_inputs": [],
+   "confidence": "low",
+   "note": "The metric assumes the configured wheelbase and steering ratio; a wrong value shifts every reading.",
+   "version": 1,
+   "enabled": true,
+   "calibrate": {
+    "parameter": "over_metric",
+    "signal": "oversteer_metric",
+    "where": "speed > $min_speed",
+    "percentile": 98.0
+   }
+  },
+  {
+   "id": "brake_throttle_overlap",
+   "title": "Braking anomaly: throttle held while braking",
+   "on": "throttle > $overlap_throttle and acc_long_calc < -$overlap_brake_g and speed > $min_speed",
+   "off": "",
+   "min_duration_s": 0.3,
+   "merge_gap_s": 0.2,
+   "severity": "throttle",
+   "moderate": null,
+   "severe": null,
+   "evidence": [
+    "throttle",
+    "acc_long_calc",
+    "speed"
+   ],
+   "fine_inputs": [],
+   "confidence": "low",
+   "note": "Deliberate left-foot braking looks the same; so does lift-off on a steep climb.",
+   "version": 1,
+   "enabled": true,
+   "calibrate": {}
+  },
+  {
+   "id": "steering_correction",
+   "title": "Possible steering correction",
+   "on": "speed > $min_speed and abs(steering_rate) > $correction_rate",
+   "off": "",
+   "min_duration_s": 0.05,
+   "merge_gap_s": 0.25,
+   "severity": "abs(steering_rate)",
+   "moderate": 600.0,
+   "severe": 900.0,
+   "evidence": [
+    "steering",
+    "steering_rate",
+    "speed"
+   ],
+   "fine_inputs": [],
+   "confidence": "low",
+   "note": "A chicane or a hairpin needs fast hands too; compare with the same place on other laps.",
+   "version": 1,
+   "enabled": true,
+   "calibrate": {
+    "parameter": "correction_rate",
+    "signal": "abs(steering_rate)",
+    "where": "speed > $min_speed",
+    "percentile": 99.8
+   }
+  },
+  {
+   "id": "speed_glitch",
+   "title": "Possible sensor fault: speed jumps",
+   "on": "SpeedChangeG > $glitch_g",
+   "off": "",
+   "min_duration_s": 0.0,
+   "merge_gap_s": 0.5,
+   "severity": "SpeedChangeG",
+   "moderate": null,
+   "severe": null,
+   "evidence": [
+    "speed"
+   ],
+   "fine_inputs": [
+    "speed"
+   ],
+   "confidence": "medium",
+   "note": "A real impact also changes speed this fast.",
+   "version": 1,
+   "enabled": true,
+   "calibrate": {}
+  }
+ ]
+}

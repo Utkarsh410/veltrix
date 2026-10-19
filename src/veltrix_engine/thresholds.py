@@ -74,6 +74,12 @@ def _check(overrides: dict) -> dict:
     return clean
 
 
+def _engine_modules() -> list:
+    import sys
+    return [m for name, m in list(sys.modules.items())
+            if m is not None and (name == "veltrix_engine" or name.startswith("veltrix_engine."))]
+
+
 @contextmanager
 def use(overrides: dict | None):
     """Run the code inside with these thresholds in place of the defaults."""
@@ -83,8 +89,9 @@ def use(overrides: dict | None):
         for key, value in clean.items():
             mod_name, name = key.split(".", 1)
             old = getattr(MODULES[mod_name], name)
-            # a module that took its copy of this threshold from another follows it
-            for other in MODULES.values():
+            # a module that took its copy of this threshold from another follows it — any loaded engine
+            # module, not only the registered ones (a package's sections each hold their own copy)
+            for other in _engine_modules():
                 if hasattr(other, name) and getattr(other, name) == old and type(getattr(other, name)) is type(old):
                     undo.append((other, name, getattr(other, name)))
                     setattr(other, name, value)
@@ -97,11 +104,17 @@ def use(overrides: dict | None):
 def save(path: str | Path, overrides: dict) -> Path:
     clean = _check(overrides)
     path = Path(path)
-    path.write_text(json.dumps({"version": 1, "thresholds": {k: list(v) if isinstance(v, tuple) else v for k, v in clean.items()}},
+    from .versions import refuse_overwrite
+    refuse_overwrite(path, "threshold file", THRESHOLDS_VERSION)
+    path.write_text(json.dumps({"version": THRESHOLDS_VERSION, "thresholds": {k: list(v) if isinstance(v, tuple) else v for k, v in clean.items()}},
                                indent=1), encoding="utf-8")
     return path
 
 
+THRESHOLDS_VERSION = 1
+
+
 def load(path: str | Path) -> dict:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    from .versions import upgrade
+    data = upgrade("threshold file", json.loads(Path(path).read_text(encoding="utf-8")), THRESHOLDS_VERSION)
     return _check(data.get("thresholds", {}))

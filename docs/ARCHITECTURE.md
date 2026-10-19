@@ -6,19 +6,51 @@ The canonical data model every layer below reads is described in
 ## Layers
 
 ```
-macOS app (SwiftUI / AppKit)            not started
+desktop app            src/veltrix_app       PySide6 windows and docks; no analysis of its own
+        │                                     (Qt-free helpers: workspace, compare, trackmap, video_sync)
+report / CLI           veltrix_engine.report, veltrix_engine.cli
         │
-application services                    not started
-        │
-analysis engine                         this repository, Python reference
-  importers → mapping → normalise → laps → derived → analysis / models
-        │
-project store                           SQLite metadata + Parquet telemetry
+analysis               veltrix_engine.analysis   engineering report (a package, one module per section),
+        │                                        advice, balance, handling, tyres, gg, plausibility
+engine                 veltrix_engine            importers → mapping → session → laps → corners → derived;
+        │                                        maths, events, user_data (notes, reviews, rules, data folder)
+storage                model_store, store        Parquet + manifest per session; SQLite project database
 ```
 
-The engine has no UI, plotting or reporting code and does no I/O outside the
-importers and the store. Every analysis function takes a `Session` (or plain
-arrays) and returns tables or numbers.
+**Rules between the layers** — checked by `tests/test_architecture.py` on every run:
+
+- The engine never imports the desktop app. The single exception is the
+  `veltrix app` command, whose job is to start it. Anything the command line
+  and the app both need (the data folder, saved maths, rules, notes, reviews)
+  lives in the engine (`user_data.py`).
+- The analysis never imports the report or the command line. The report reads
+  the analysis; the analysis does not know how it is shown.
+- No module is longer than 900 lines. A module that size is several modules;
+  the engineering report was split for this reason, the window's session charts
+  moved to `session_charts.py`.
+
+**Errors** (`errors.py`): `VeltrixError` with `FileFormatError` (a file that
+cannot be read), `MappingError` (columns that cannot become the channels the
+analysis needs) and `VersionError` (a saved file from a release this one cannot
+read or must not overwrite). All are also `ValueError`, so older callers still
+catch them. `read_file` turns anything an importer trips over into a
+`FileFormatError` naming the file; the details go to the log.
+
+**Saved files** (`versions.py`): every saved kind carries a format version and is
+read through `versions.upgrade` — newer files are refused with a reason, older
+ones are migrated one step at a time; stores call `refuse_overwrite` before
+writing. `tests/fixtures/saved_release_1/` holds one file of every kind as
+release 1 wrote it; `tests/test_saved_files.py` keeps them opening.
+
+**Log and crash reports**: `logs.setup()` writes `logs/veltrix.log` in the data
+folder (file names, formats, timings, errors — never telemetry). The app's
+`crash.install()` writes `crash_reports/crash-*.txt` on an unexpected error and
+tells the user where; nothing is sent.
+
+**Tests**: `pytest` runs everything on every push (`.github/workflows/tests.yml`,
+macOS). `pytest -m real` runs the regression check on the user's real sessions,
+kept on this machine with their frozen outputs (`tests/real_sessions.py`,
+`tools/freeze_real_sessions.py`).
 
 ## Import pipeline
 

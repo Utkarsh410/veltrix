@@ -60,11 +60,9 @@ def _plain(o):
 
 
 def read_manifest(folder: str | Path) -> dict:
+    from .versions import upgrade
     manifest = json.loads((Path(folder) / MANIFEST).read_text(encoding="utf-8"))
-    if manifest.get("model_version", 0) > MODEL_VERSION:
-        raise ValueError(f"This session was saved by a newer version of the engine (model version "
-                         f"{manifest['model_version']}; this engine reads up to {MODEL_VERSION}).")
-    return manifest
+    return upgrade("session", manifest, MODEL_VERSION, key="model_version")
 
 
 def load_model(folder: str | Path, channels: list | None = None) -> SessionModel:

@@ -86,6 +86,8 @@ class Profile:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Profile":
+        from .versions import upgrade
+        data = upgrade("mapping profile", data, PROFILE_VERSION)
         if data.get("version", 1) > PROFILE_VERSION:
             raise ValueError("This mapping profile was saved by a newer version of the engine.")
         rules = [Rule(**r) for r in data.get("rules", [])]

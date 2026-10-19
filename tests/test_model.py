@@ -187,7 +187,7 @@ def test_a_newer_model_version_is_refused_with_a_reason(tmp_path, logger):
     manifest = json.loads((folder / "manifest.json").read_text())
     manifest["model_version"] = 99
     (folder / "manifest.json").write_text(json.dumps(manifest))
-    with pytest.raises(ValueError, match="newer version of the engine"):
+    with pytest.raises(ValueError, match="newer release"):
         load_model(folder)
 
 

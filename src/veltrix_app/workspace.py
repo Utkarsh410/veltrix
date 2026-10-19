@@ -235,6 +235,8 @@ class Workspace:
 
     @classmethod
     def from_dict(cls, data: dict, model: SessionModel | None = None) -> "Workspace":
+        from veltrix_engine.versions import upgrade
+        data = upgrade("workspace", data, WORKSPACE_VERSION)
         if data.get("version", 1) > WORKSPACE_VERSION:
             raise ValueError("This workspace was saved by a newer version of the app.")
         ws = cls(model)

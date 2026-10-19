@@ -1,0 +1,34 @@
+{
+ "version": 1,
+ "reviews": [
+  {
+   "rule": "wheelspin",
+   "kind": "Possible wheelspin",
+   "t_start": 1.0,
+   "t_end": 1.5,
+   "lap": null,
+   "verdict": "rejected",
+   "note": "a kerb",
+   "author": "tester",
+   "at": "2026-10-19T09:43:07+00:00",
+   "original": {
+    "kind": "Possible wheelspin",
+    "t_start": 1.0,
+    "t_end": 1.5,
+    "lap": null,
+    "position_m": null,
+    "severity": "",
+    "channels": [],
+    "evidence": {},
+    "confidence": "",
+    "rule": "wheelspin",
+    "rule_version": "",
+    "label": "detected event",
+    "status": "candidate",
+    "source": "",
+    "thresholds": {}
+   },
+   "history": []
+  }
+ ]
+}

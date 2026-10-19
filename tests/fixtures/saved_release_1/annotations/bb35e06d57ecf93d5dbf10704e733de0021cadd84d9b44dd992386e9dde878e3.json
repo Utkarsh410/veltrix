@@ -1,0 +1,15 @@
+{
+ "version": 1,
+ "annotations": [
+  {
+   "text": "kerb on exit",
+   "scope": "time",
+   "lap": 2,
+   "time": 90.66,
+   "position_m": 490.3262570031693,
+   "category": "driver",
+   "author": "",
+   "created": "2026-10-19T09:43:07+00:00"
+  }
+ ]
+}
