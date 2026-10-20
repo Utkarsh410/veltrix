@@ -228,6 +228,8 @@ def _series(c: Channel) -> Series:
     values = c.values
     if values.dtype.kind not in "biuf":
         raise FormulaError(f"The channel '{c.id}' is not numeric.")
+    if values.dtype.kind in "biu":           # a file's integer column: worked in floats, so a formula cannot overflow it
+        values = values.astype(float)
     return Series(values, c.timestamps, c.validity, U.parse_unit(c.unit), c.discrete)
 
 

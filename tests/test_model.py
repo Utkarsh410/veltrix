@@ -167,7 +167,8 @@ def test_detected_incidents_become_events_worded_as_candidates():
 def test_model_round_trips_without_resampling(tmp_path, synthetic):
     m = synthetic.model
     folder = save_model(m, tmp_path / "model")
-    assert sorted(p.name for p in folder.iterdir()) == ["group_0.parquet", "group_1.parquet", "manifest.json"]
+    clocks = {np.asarray(c.timestamps, float).tobytes() for c in m.channels() if c.layer != "raw"}
+    assert sorted(p.name for p in folder.iterdir()) == [f"group_{i}.parquet" for i in range(len(clocks))] + ["manifest.json"]
     back = load_model(folder)
     assert back.describe() == {**m.describe(), "channels": {**m.describe()["channels"], "raw": 0}}
     for c in m.channels():

@@ -55,6 +55,20 @@ def test_import_stays_interactive(loaded):
     assert seconds < 20, f"import took {seconds:.1f} s (2 to 3 s when measured; this guards an order of magnitude)"
 
 
+def test_import_and_report_stay_within_the_memory_budget():
+    """Phase 19's budget: the import peaks under 1.5 GB; the report adds little to it. Measured in a fresh process,
+    where the peak is this work's alone (1.2 and 1.4 GB on 2026-10-20, from 2.3 and 2.4 GB)."""
+    import subprocess
+    import sys
+    code = ("import resource, sys; from veltrix_engine import load_session; from veltrix_engine.report import render_report\n"
+            "peak = lambda: resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (2**20 if sys.platform == 'darwin' else 2**10)\n"
+            "s = load_session(sys.argv[1]); a = peak(); render_report(s); print(a, peak())")
+    out = subprocess.run([sys.executable, "-c", code, str(PATH)], capture_output=True, text=True, check=True).stdout
+    imported, reported = map(float, out.split()[-2:])
+    assert imported < 1500, f"import peaked at {imported:.0f} MB"
+    assert reported < 1700, f"import and report peaked at {reported:.0f} MB"
+
+
 def test_maths_channels_on_the_full_session(loaded):
     from veltrix_engine import maths
     s, _ = loaded

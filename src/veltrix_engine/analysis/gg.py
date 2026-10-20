@@ -13,12 +13,13 @@ TRACTION_G = 0.2      # longitudinal g above this is the traction phase
 
 def _lat_lon(session, laps=None):
     frame = session.frame()
-    if laps is not None:
-        frame = frame[frame["lap"].isin(laps)]
     lat_id = best_lat(frame)
     if lat_id is None:
         raise ValueError("G-G analysis needs a lateral acceleration channel.")
     lon_id = "acc_long_calc" if "acc_long_calc" in frame else "acc_long"
+    frame = session.frame(["lap", lat_id, lon_id])
+    if laps is not None:
+        frame = frame[frame["lap"].isin(laps)]
     return frame[lat_id].to_numpy(float), frame[lon_id].to_numpy(float)
 
 
@@ -56,7 +57,7 @@ def gg_summary(session, laps=None) -> dict:
     util = combined / session.vehicle.grip_limit_g
     window = max(int(round(HELD_S * session.rate_hz)), 1)
     held = lambda x: pd.Series(x).rolling(window, center=True, min_periods=1).median().to_numpy()
-    frame = session.frame()
+    frame = session.frame(["lap", "acc_long"])
     if laps is not None:
         frame = frame[frame["lap"].isin(laps)]
     measured = frame["acc_long"].to_numpy(float) if "acc_long" in frame and frame["acc_long"].notna().any() else lon

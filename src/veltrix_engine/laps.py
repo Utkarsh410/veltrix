@@ -290,15 +290,15 @@ def lap_trace(session, lap, channels=None) -> pd.DataFrame:
     plus the requested channels (default: every measured and derived channel)."""
     row = session.lap_row(lap)
     frame = session.frame()
-    rows = frame[frame["lap"] == lap]
-    out = pd.DataFrame({"t": rows["time"].to_numpy() - row.t_start,
-                        "dist": rows["lap_distance"].to_numpy()})
     skip = {"time", "lap", "lap_distance"}
     if channels is None:
         channels = [c for c in frame.columns if c not in skip]
+    at = np.flatnonzero(frame["lap"].to_numpy() == lap)      # the lap's rows, for the channels asked for only
+    out = pd.DataFrame({"t": frame["time"].to_numpy()[at] - row.t_start,
+                        "dist": frame["lap_distance"].to_numpy()[at]})
     for c in channels:
-        if c in rows:
-            out[c] = rows[c].to_numpy()
+        if c in frame:
+            out[c] = frame[c].to_numpy()[at]
     return out
 
 

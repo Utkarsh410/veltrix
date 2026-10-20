@@ -120,6 +120,7 @@ def track_xy(session, lap=None) -> pd.DataFrame:
     """Path of one lap as logged or integrated, without closing it.
     Kept for exports; `track_map` is the one to draw."""
     frame = session.frame()
+    frame = session.frame(["lap", "time", "lap_distance", "pos_x", "pos_y", "speed", best_lat(frame)])
     if lap is not None:
         frame = frame[frame["lap"] == lap]
     out = pd.DataFrame({"time": frame["time"].to_numpy(),

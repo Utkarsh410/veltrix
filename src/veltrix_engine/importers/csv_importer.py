@@ -132,6 +132,11 @@ def _finish(df: pd.DataFrame, lines: list, layout: dict, skipped: int) -> RawTab
             df[c] = num
             if parsed < present:
                 bad_cells[c] = present - parsed
+    for c in df.columns:
+        # Many loggers write scaled integers: kept in the smallest integer type that holds every value exactly,
+        # the table takes a quarter of the memory. The values are the file's own either way.
+        if pd.api.types.is_integer_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c]):
+            df[c] = pd.to_numeric(df[c], downcast="integer")
     return RawTable(df, units, info, beacons, sep, decimal, bad_cells, max(skipped, 0))
 
 

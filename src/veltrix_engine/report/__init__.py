@@ -157,7 +157,8 @@ def report_data(session, title: str | None = None) -> dict:
     usable_lat = lat_id is not None and not ("acc_lat" in s.coarse and "acc_lat" not in s.rebuilt)
     if usable_lat and "acc_long_calc" in frame:
         scope_laps = flying or list(laps["lap"])
-        part = frame[frame["lap"].isin(scope_laps)]
+        part = s.frame(["lap", lat_id, "acc_long_calc"])
+        part = part[part["lap"].isin(scope_laps)]
         lat, lon = part[lat_id].to_numpy(float), part["acc_long_calc"].to_numpy(float)
         ok = np.isfinite(lat) & np.isfinite(lon)
         lat, lon = lat[ok], lon[ok]

@@ -48,7 +48,7 @@ What is not there yet, and matters for every phase below:
 | 16 | AI Race Engineer | Medium–High | Every finding already has evidence, calculation, confidence and recommendation | **M** |
 | 17 | Live telemetry and session monitoring | Medium | Nothing | **L** |
 | 18 | Collaboration and team workflows | Medium | Notes and reviews carry an author; nothing shared | **L** |
-| 19 | Performance optimisation and scalability | Ongoing | Profiling and a benchmark exist; 264 MB CSV peaks at 2.4–3.1 GB | ongoing |
+| 19 | Performance optimisation and scalability | Ongoing | Budgets met 2026-10-20: 264 MB CSV imports at 1.2 GB peak, report adds 0.2 GB | ongoing |
 | 20 | Product release, licensing and distribution | Final | Launchers tied to this folder; packaging notes only | **L** |
 
 Sizes are relative: **S** about one working session, **M** two to four, **L**
@@ -369,15 +369,23 @@ other's notes and verdicts.
 
 **Budgets**, checked in CI from Phase 4 on:
 
-| Measure | Today | Budget |
-|---|---|---|
-| Import of the 264 MB reference CSV, peak memory | 2.4–3.1 GB | under 1.5 GB |
-| Import time, same file | recorded in [performance.md](performance.md) | no regression above 10% |
-| Chart redraw, zoom, cursor | recorded | under 50 ms |
-| Report build, 70,000-sample session | about 14 s | under 10 s |
+| Measure | 2026-10-19 | 2026-10-20 | Budget |
+|---|---|---|---|
+| Import of the 264 MB reference CSV, peak memory | 2.3–2.5 GB | 1.2 GB | under 1.5 GB |
+| Import time, same file | 2.1–3.2 s | 2.0 s | no regression above 10% |
+| Chart redraw after a pan / cursor move | 21 / 42 ms | 21 / 41 ms | under 50 ms |
+| Report build, 70,000-sample session (Spa `.ibt`, command line) | about 14 s (old figure) | 1.6 s | under 10 s |
 
-Work: share arrays between layers when nothing is resampled; compute derived
-channels on native timestamps; cache maths results; profile each wave.
+**Status, 2026-10-20:** budgets met; the memory one is a test
+(`tests/test_reference_session.py`, runs where the reference CSV is on the
+machine). Done: a log on a steady clock is analysed on its own timestamps
+with no copy; integer CSV columns kept in the smallest exact type; no whole-
+frame copies in the analyses (`Session.frame(columns)`); the model store
+writes and reads Parquet without a pandas copy. Outputs unchanged except
+floating-point rounding (one tyre sample on the synthetic set crosses its
+window edge). Details in [performance.md](performance.md). **Open:** derived
+channels on native timestamps for multi-rate files; caching maths results;
+the HTML report embeds every lap trace.
 
 ### Phase 20 — Product release, licensing and distribution (Final)
 

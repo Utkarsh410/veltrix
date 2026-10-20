@@ -20,6 +20,7 @@ def _steer_per_g(session, laps=None):
     if lat_id is None or not {"speed", "steering"} <= set(frame.columns):
         return None
     if laps is not None:
+        frame = session.frame(["lap", "speed", "steering", lat_id])
         frame = frame[frame["lap"].isin(laps)]
     v = frame["speed"].to_numpy(float) / 3.6
     ay = frame[lat_id].to_numpy(float)
@@ -73,5 +74,7 @@ def balance_by_lap(session):
     frame = session.frame()
     if "oversteer_metric" not in frame:
         return None
-    corner = frame[frame[best_lat(frame)].abs() > 0.3]
+    lat_id = best_lat(frame)
+    frame = session.frame(["lap", "oversteer_metric", lat_id])
+    corner = frame[frame[lat_id].abs() > 0.3]
     return corner.groupby("lap")["oversteer_metric"].mean()

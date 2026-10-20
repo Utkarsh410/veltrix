@@ -19,7 +19,6 @@ import json
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 from .model import (MODEL_VERSION, Annotation, Channel, Event, Lap, Provenance, SessionModel, SourceFile, Stint)
 
@@ -40,14 +39,19 @@ def save_model(model: SessionModel, folder: str | Path) -> Path:
             groups[key] = (f"group_{len(groups)}.parquet", c.timestamps, [])
         groups[key][2].append(c)
         where[c.ref] = groups[key][0]
+    import pyarrow as pa
+    import pyarrow.parquet as pq
     for name, timestamps, chans in groups.values():
-        columns = {"time": np.asarray(timestamps, float)}
+        # Arrow columns straight from the arrays: going through a DataFrame first copied every channel.
+        # NaN is written as missing, as pandas writes it.
+        columns = {"time": pa.array(np.asarray(timestamps, float), from_pandas=True)}
         for c in chans:
             values = c.values
-            columns[c.ref] = values.astype(str) if values.dtype == object else values
+            columns[c.ref] = (pa.array(values.astype(str), type=pa.large_string()) if values.dtype == object
+                              else pa.array(values, from_pandas=True))
             if c.valid is not None:
-                columns[f"valid|{c.ref}"] = c.valid
-        pd.DataFrame(columns).to_parquet(folder / name, compression="zstd", index=False)
+                columns[f"valid|{c.ref}"] = pa.array(c.valid)
+        pq.write_table(pa.table(columns), folder / name, compression="zstd")
     for entry in manifest["channels"]:
         ref = f"{entry['layer']}:{entry['id']}"
         entry["file"] = where.get(ref)             # None: a raw channel, read again from the source file
@@ -89,20 +93,21 @@ def load_model(folder: str | Path, channels: list | None = None) -> SessionModel
     for name, entries in by_file.items():
         refs = [f"{e['layer']}:{e['id']}" for e in entries]
         import pyarrow.parquet as pq
-        present = set(pq.read_schema(folder / name).names)
-        masks = [f"valid|{r}" for r in refs if f"valid|{r}" in present]
-        frame = pd.read_parquet(folder / name, columns=["time", *refs, *masks])
-        t = frame["time"].to_numpy()
+        stored = pq.ParquetFile(folder / name)
+        present = set(stored.schema_arrow.names)
+        # column by column: reading the file into one frame held every array twice while it was converted
+        column = lambda ref: stored.read(columns=[ref]).column(0).to_numpy(zero_copy_only=False)
+        t = column("time")
         for e, ref in zip(entries, refs):
             prov = e["provenance"]
-            values = frame[ref].to_numpy()
+            values = column(ref)
             if e["id"] == "lap" and values.dtype == object:
                 values = np.array([int(v) if v.lstrip("-").isdigit() else v for v in values], dtype=object)
             model.add(Channel(
                 id=e["id"], layer=e["layer"], label=e["label"], timestamps=t, values=values, unit=e["unit"],
                 name=e["name"], source_name=e["source_name"], description=e["description"], category=e["category"],
                 quantity=e["quantity"], discrete=e["discrete"],
-                valid=frame[f"valid|{ref}"].to_numpy() if f"valid|{ref}" in frame else None,
+                valid=column(f"valid|{ref}") if f"valid|{ref}" in present else None,
                 formula=e["formula"], dependencies=tuple(e["dependencies"]), quality=list(e["quality"]),
                 provenance=Provenance(tuple(prov["inputs"]), prov["algorithm"], prov["parameters"], prov["unit_source"],
                                       prov["engine_version"], tuple(prov["notes"])),

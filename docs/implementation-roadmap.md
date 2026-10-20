@@ -477,6 +477,21 @@ All four priorities (P0–P3) of the user's improvement list are done.
   `tests/test_exports.py`. No `.ld` writer (cannot be checked against MoTeC i2 here).
 - Golden frozen outputs and real-session freezes updated: additions only (new channels; new balance findings).
 
+## Phase 19 (performance) — what was built, 2026-10-20
+
+- Import peak on the 264 MB reference CSV 2.3 → 1.2 GB, report peak 2.4 → 1.4 GB, model save +560 → +80 MB,
+  model load +1.0 → +0.5 GB (load of all channels 42 → 150 ms: read column by column).
+- `session._resample`: a log already on a steady clock keeps its own timestamps and gap-free arrays (no
+  interpolation onto the same instants); the row filter and sort of the time base only run when needed.
+- `importers/csv_importer._finish`: integer columns downcast to the smallest type holding them exactly;
+  `maths._series` works such columns in floats so a formula cannot overflow.
+- `Session.frame(columns)`; `corners._lap_frames`, `laps.lap_trace`, `handling`, `balance`, `gg`, `track_xy`
+  and the report's G-G block pick rows from the columns they use only.
+- `model_store`: Parquet written from Arrow arrays and read column by column (no pandas frame).
+- `benchmarks/profile_session.py` shows the memory peak after each step; memory budget test in
+  `tests/test_reference_session.py`. Golden outputs refrozen: rounding only, plus one tyre sample on the
+  synthetic set that now falls inside its window. `pytest -m real` unchanged.
+
 ## Open items carried forward
 
 | Item | Rule | Planned in |

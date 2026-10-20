@@ -57,9 +57,11 @@ class Session:
     counts: dict = field(default_factory=dict)    # original against cleaned sample counts — see build_session
     model: SessionModel | None = None             # the canonical model this session is a view of
 
-    def frame(self) -> pd.DataFrame:
-        """Normalised and derived channels side by side."""
-        return pd.concat([self.channels, self.derived], axis=1)
+    def frame(self, columns=None) -> pd.DataFrame:
+        """Normalised and derived channels side by side (not copied). columns:
+        only these, where present — for picking rows out, which copies what it keeps."""
+        frame = pd.concat([self.channels, self.derived], axis=1)
+        return frame if columns is None else frame[[c for c in dict.fromkeys(columns) if c and c in frame]]
 
     def lap_row(self, lap):
         rows = self.laps[self.laps["lap"] == lap]
@@ -203,7 +205,8 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     timer_crossings = None
     timed = np.isfinite(cdf["time"]).to_numpy()
     counts["rows_without_time"] = int((~timed).sum())
-    cdf = cdf[timed].reset_index(drop=True)
+    if not timed.all():                    # each of these steps copies the table, so only when there is work to do
+        cdf = cdf[timed].reset_index(drop=True)
     t = cdf["time"].to_numpy()
     if lap_engine.time_restarts(t):
         cdf["time"], timer_crossings = lap_engine.stitch_lap_timer(t)
@@ -212,8 +215,9 @@ def build_session(raw: RawTable, vehicle: VehicleParams | None = None, mapping: 
     steps = np.diff(cdf["time"].to_numpy())
     counts["rows_out_of_order"] = int((steps < 0).sum())
     before = len(cdf)
-    cdf = (cdf.sort_values("time", kind="stable")
-              .drop_duplicates(subset="time", keep="last").reset_index(drop=True))
+    if not (steps > 0).all():
+        cdf = (cdf.sort_values("time", kind="stable")
+                  .drop_duplicates(subset="time", keep="last").reset_index(drop=True))
     counts["rows_repeated_time"] = before - len(cdf)
     counts["rows_used"] = int(len(cdf))
     if len(cdf) < 10:
@@ -714,17 +718,23 @@ def _resample(cdf, t, rate_hz, lap_table, lap_d, d_cum) -> pd.DataFrame:
     n = int(np.floor((t[-1] - t[0]) / dt + 1e-6)) + 1
     t_new = t[0] + np.arange(n) * dt
     hold = np.clip(np.searchsorted(t, t_new + 1e-9, side="right") - 1, 0, len(t) - 1)
+    # A log on a steady clock is analysed on its own timestamps: the new grid is the old one, so a channel
+    # with no gaps is used as it is — interpolating it onto the same instants would only copy it.
+    same_grid = n == len(t) and float(np.max(np.abs(t_new - t))) <= 1e-6 * dt
 
-    out = {"time": t_new}
+    out = {"time": t if same_grid else t_new}
     for cid in cdf.columns:
         if cid in ("time", "lap", "distance"):
             continue
         x = cdf[cid].to_numpy(float)
         if CHANNELS[cid].discrete:
-            out[cid] = x[hold]
+            out[cid] = x if same_grid else x[hold]
             continue
         ok = np.isfinite(x)
-        out[cid] = np.interp(t_new, t[ok], x[ok]) if ok.sum() >= 2 else np.full(n, np.nan)
+        if same_grid and ok.all():
+            out[cid] = x
+        else:
+            out[cid] = np.interp(t_new, t[ok], x[ok]) if ok.sum() >= 2 else np.full(n, np.nan)
 
     # Lap of each sample: a lap owns the time from its start crossing to its end crossing
     starts = lap_table["t_start"].to_numpy()
@@ -732,7 +742,7 @@ def _resample(cdf, t, rate_hz, lap_table, lap_d, d_cum) -> pd.DataFrame:
     labels = lap_table["lap"].to_numpy()
     out["lap"] = labels[which]
 
-    out["distance"] = np.interp(t_new, t, d_cum - d_cum[0])
+    out["distance"] = (d_cum - d_cum[0]) if same_grid else np.interp(t_new, t, d_cum - d_cum[0])
     lap_dist = np.full(n, np.nan)
     if lap_d is not None:
         for i, lap in enumerate(lap_table.itertuples()):
@@ -751,7 +761,7 @@ def _resample(cdf, t, rate_hz, lap_table, lap_d, d_cum) -> pd.DataFrame:
             lap_dist[sel] = np.interp(t_new[sel], ts, ds)
     out["lap_distance"] = lap_dist
 
-    frame = pd.DataFrame(out)
+    frame = pd.DataFrame(out, copy=False)                 # the arrays as they are, not copied into one block
     for cid in frame.columns:
         if cid in CHANNELS and CHANNELS[cid].discrete and cid != "lap":
             if np.isfinite(frame[cid]).all():

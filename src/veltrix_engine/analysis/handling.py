@@ -129,8 +129,9 @@ def analyse(session, corners: pd.DataFrame | None = None, laps=None) -> dict:
     if all(w in frame for w in wheels):
         # rear minus front wheel speed, on the same distance grid
         slip_frames = {}
+        wheel_frame = session.frame(["lap", "lap_distance", *wheels])
         for lap in laps:
-            rows = frame[frame["lap"] == lap]
+            rows = wheel_frame[wheel_frame["lap"] == lap]
             slip = (rows[wheels[2]] + rows[wheels[3]] - rows[wheels[0]] - rows[wheels[1]]).to_numpy(float) / 2
             d = np.maximum.accumulate(np.nan_to_num(rows["lap_distance"].to_numpy(float)))
             keep = np.r_[True, np.diff(d) > 0]

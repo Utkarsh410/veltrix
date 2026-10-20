@@ -30,8 +30,14 @@ def best(fn, n=5):
     return out
 
 
+class Rows(list):
+    """(step, seconds, peak memory in MB once the step has run): a step that raises the peak shows where."""
+    def append(self, row):
+        super().append((*row, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6))
+
+
 def main(path: str) -> None:
-    rows = []
+    rows = Rows()
     t0 = time.perf_counter()
     from veltrix_engine import corners, events, laps as lap_engine, load_session, maths
     from veltrix_engine.analysis import engineering
@@ -106,8 +112,10 @@ def main(path: str) -> None:
     print(f"Peak memory after import: {rss_import:,.0f} MB; at the end: {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6:,.0f} MB; "
           f"model on disk: {size:.0f} MB\n")
     width = max(len(r[0]) for r in rows)
-    for name, seconds in rows:
-        print(f"  {name:<{width}}  {seconds * 1000:>9.1f} ms" if seconds < 1 else f"  {name:<{width}}  {seconds:>9.2f} s")
+    print(f"  {'':<{width}}  {'time':>9}     peak so far")
+    for name, seconds, peak in rows:
+        took = f"{seconds * 1000:>9.1f} ms" if seconds < 1 else f"{seconds:>9.2f} s "
+        print(f"  {name:<{width}}  {took}  {peak:>7,.0f} MB")
 
 
 if __name__ == "__main__":

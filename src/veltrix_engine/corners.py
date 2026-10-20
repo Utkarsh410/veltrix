@@ -69,21 +69,22 @@ def _speed_for_analysis(session) -> pd.Series:
 
 
 def _lap_frames(session, laps, step) -> tuple[np.ndarray, dict]:
-    """Each lap resampled onto the same distance grid: {lap: DataFrame}."""
+    """Each lap resampled onto the same distance grid: {lap: DataFrame}.
+    Only the channels the corner work uses are read, lap by lap — never a copy
+    of the whole session."""
     grid = lap_engine.distance_grid(session, step)
-    frame = session.frame().copy()
-    frame["speed"] = _speed_for_analysis(session)
-    wanted = [c for c in ("speed", "throttle", "brake", "steering", "acc_long", "acc_long_calc", "acc_lat_calc",
-                          "acc_lat_sustained",
-                          "pos_x", "pos_y", best_lat(frame)) if c and c in frame]
+    frame = session.frame()
+    columns = {c: frame[c].to_numpy() for c in ("speed", "throttle", "brake", "steering", "acc_long", "acc_long_calc",
+                                                 "acc_lat_calc", "acc_lat_sustained", "pos_x", "pos_y", best_lat(frame))
+               if c and c in frame}
+    columns["speed"] = _speed_for_analysis(session).to_numpy()
+    time, dist, lap_of = frame["time"].to_numpy(), frame["lap_distance"].to_numpy(), frame["lap"].to_numpy()
     out = {}
     for lap in laps:
         row = session.lap_row(lap)
-        rows = frame[frame["lap"] == lap]
-        trace = pd.DataFrame({"t": rows["time"].to_numpy() - row.t_start,
-                              "dist": rows["lap_distance"].to_numpy()})
-        for c in wanted:
-            trace[c] = rows[c].to_numpy()
+        at = np.flatnonzero(lap_of == lap)
+        trace = pd.DataFrame({"t": time[at] - row.t_start, "dist": dist[at],
+                              **{c: v[at] for c, v in columns.items()}})
         out[lap] = lap_engine.on_distance_grid(trace, grid)
     return grid, out
 
