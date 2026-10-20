@@ -97,6 +97,12 @@ contract (`check_table`) before anything else sees them, and
 [importers.md](importers.md). `batch.py` runs the import (and the report,
 engineering report or export) over a folder, one process per file when asked.
 
+`library.py` is the session library: a SQLite index (`library.sqlite` in the
+app's data folder) of sessions where they lie, with one summary row per file,
+user overrides, aliases, tags and events. It reads files only to index them
+and to compare two; the project store (`store.py`) remains the place that
+keeps copies and analysed data. `cli_library.py` is its command line.
+
 An importer decodes only what is the format's own encoding (a clock written as
 HHMMSS, coordinates in minutes). Units and signs are still converted in one
 place, `session.py`.

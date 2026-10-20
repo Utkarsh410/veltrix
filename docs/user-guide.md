@@ -299,6 +299,41 @@ fixed point per corner, taken from a typical lap.
   and as a PDF. A saved spec builds exactly the same document again.
 - **Export**: the session's channels with their units, for other tools.
 
+## The session library
+
+    veltrix library scan ~/Telemetry                       # once; afterwards only new and changed files are read
+    veltrix library list --track Spa --since 2026-09-01
+    veltrix library list --search wet --tag baseline --sort best_lap_s
+    veltrix library show 12
+    veltrix library alias track "Circuit de Spa-Francorchamps Grand Prix" Spa
+    veltrix library set 12 driver "A. Driver"              # "" puts back what the file says
+    veltrix library tag 12 13 --add wet baseline
+    veltrix library events --suggest --create              # one event per track and run of dates
+    veltrix library event "Spa test day" --add 12 13 --kind "test day"
+    veltrix library progress --track Spa --car GR86        # best and ideal lap, session by session
+    veltrix library best                                   # the fastest session per track and car
+    veltrix library compare 12 13 --change "rear bar +1"
+
+The library is an index of your sessions where they already are; nothing is
+copied. Each file is read once, for its venue, car, driver, date, laps, best
+lap, ideal lap (the best corner times put together) and lap-to-lap scatter.
+After that, `list`, `progress` and `best` answer without opening the files.
+`compare` reads the two files it compares.
+
+- **Names.** What a session is called comes from you (`set`), then an alias
+  (`alias`, for the circuit or car that files spell differently), then the
+  file. `list --all` also shows files that failed, went missing or are copies
+  of another.
+- **Dates.** They are read from the file's header, day first as MoTeC and the
+  simulators write them. A date in the file or folder name settles a header
+  that could be read either way round. Failing both, the file's own time is
+  used, and `show` says which source it was.
+- **Moving files.** A file that is moved or renamed keeps its id, tags and
+  event when its new folder is scanned: it is recognised by its content. A file
+  that is gone is shown as missing.
+- **Where it lives.** `library.sqlite` in the app's data folder; `--library
+  FILE` uses another one.
+
 ## A folder of files at once
 
     veltrix batch season_2026/ --report --engineer      # an HTML report and the engineering report of each

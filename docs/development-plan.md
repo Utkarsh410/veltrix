@@ -43,7 +43,7 @@ What is not there yet, and matters for every phase below:
 | 11 | Driver performance and coaching | High | Driver findings, braking from turn-in, per-corner comparison | **M** |
 | 12 | Setup and vehicle-performance analysis | High | Evidence-gated setup hypotheses; iRacing setup read in part | **L** |
 | 13 | Reporting and engineering deliverables | High | HTML report with data/limits tab, Markdown and text | **M** |
-| 14 | Session management and workflow | Medium–High | Project store per folder; no session library | **L** |
+| 14 | Session management and workflow | Medium–High | Engine side built 2026-10-20: session library (`veltrix library`); app view waits for a reference | **L** |
 | 15 | Extensible importers and integrations | Medium–High | Built 2026-10-20: plug-in interface, test kit, batch mode; exports in wave D | **M** |
 | 16 | AI Race Engineer | Medium–High | Every finding already has evidence, calculation, confidence and recommendation | **M** |
 | 17 | Live telemetry and session monitoring | Medium | Nothing | **L** |
@@ -242,7 +242,7 @@ setup values or a published test), and the report states its assumptions.
 
 ### Phase 11 — Driver performance and coaching (High)
 
-**Status, 2026-10-19:** coaching cards built (`analysis/coaching.py`, `veltrix coach`, printable page). **Open:** a reference lap from another driver; progress over sessions (needs phase 14); a coach's check on a real session.
+**Status, 2026-10-19:** coaching cards built (`analysis/coaching.py`, `veltrix coach`, printable page). **Open:** a reference lap from another driver; progress over sessions per corner (lap-level progress is `veltrix library progress`, phase 14); a coach's check on a real session.
 
 **There:** driver findings (coasting, overlap, consistency, braking repeatability),
 braking points from the turn-in, the corner-by-corner lap comparison.
@@ -304,6 +304,27 @@ and a PDF is ready to send.
 
 **Done when:** a season of sessions is found, filtered and compared without
 opening folders.
+
+**Status, 2026-10-20:** the engine side is built.
+- `library.py` and `veltrix library`: an index of sessions where they lie
+  (nothing copied), filled by `scan`, which reads only new and changed files.
+  Search and filters (track, car, driver, simulator, tag, event, session type,
+  dates, text). Your own values over aliases over the file. Tags and notes.
+  Events, with suggestions from track and date.
+- Across sessions: `progress` (best, ideal, median lap and scatter, session by
+  session), `best` per track and car, and `compare` (phase 12's comparison) by
+  library id.
+- Moved files keep their id. Missing, failed and duplicate files are listed as
+  such.
+
+`tests/test_library.py` builds a six-session season over two events and
+checks all of this. On the three real sessions a scan takes 3.9 s with three
+jobs, and gives the figures the regression tests pin.
+
+**Open:**
+- The app's library view, which waits for a reference screenshot.
+- Runs inside a session beyond the stints the lap table already has.
+- Per-corner progress for coaching (phase 11).
 
 ### Phase 15 — Extensible importers and integrations (Medium–High)
 

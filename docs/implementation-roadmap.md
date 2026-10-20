@@ -509,6 +509,24 @@ All four priorities (P0–P3) of the user's improvement list are done.
   only `Importer` and `RawTable`. Tests: `tests/test_importer_plugins.py` (26), `tests/test_batch.py` (7).
 - Docs: `docs/importers.md`; the user guide, ARCHITECTURE and README updated.
 
+## Phase 14, engine side (session library) — what was built, 2026-10-20
+
+- `library.py` (`Library`, schema `library_version` 1, refused when newer):
+  - `scan`: reuses `batch.find_files`; unchanged files (size, modification time, engine version) are skipped;
+    moves are found by SHA-256; files gone are marked missing; copies are duplicates; `jobs` processes.
+  - `summarise`: venue, car, driver, session type, date with its source, laps, flying laps, stints, best, ideal
+    (`corners.analyse`), median and scatter of laps within 107 % of the best.
+  - `set` (track, car, driver, simulator, date, session_type), `alias`, `tag`, `note`, `forget`.
+  - Events: `create_event`, `leave_event`, `delete_event`, `events`, `suggest_events` (same track, dates no more
+    than 3 days apart).
+  - `find` (filters, text, sort), `get`, `progress`, `best`, `load`, and `compare` (ab.compare_sessions; the
+    library's names settle a circuit or car the two files spell differently).
+- `cli_library.py`: `veltrix library scan|list|show|set|alias|aliases|tag|note|event|events|progress|best|
+  compare|forget`, `--library FILE`.
+- Dates: header, day first; a date in the file or folder name settles which way round; else the file time.
+- Tests: `tests/test_library.py` (25). Real sessions: Hungaroring 1:50.498 / ideal 1:48.911, Nürburgring
+  2:02.330 / 2:00.730, Spa 2:44.741 / 2:42.806.
+
 ## Open items carried forward
 
 | Item | Rule | Planned in |

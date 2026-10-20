@@ -29,7 +29,9 @@ readers are installed; `pip install -e ".[all]"` installs all of them.
 
 Other formats can be added as plug-ins, without changing the engine: see
 [docs/importers.md](docs/importers.md) and the example in `examples/importer_plugin/`.
-A whole folder is imported with `veltrix batch FOLDER --report`.
+A whole folder is imported with `veltrix batch FOLDER --report`. `veltrix library scan FOLDER`
+indexes every session so it can be found, filtered and compared without opening folders
+(`veltrix library list --track Spa`, `progress`, `compare 12 13`).
 
 A CAN log holds frames, not channels, so it needs its DBC: pass `--dbc car.dbc`
 (or `dbc=` in Python), or keep the `.dbc` in the same folder as the log.
@@ -284,7 +286,7 @@ Foundation phase of the product plan:
 |---|---|
 | Audit of the existing toolkits | Done — [docs/AUDIT.md](docs/AUDIT.md) |
 | Canonical channel schema, units and sign conventions | Done — [docs/CHANNEL_SCHEMA.md](docs/CHANNEL_SCHEMA.md) |
-| Core calculations extracted and tested | Done — 463 tests |
+| Core calculations extracted and tested | Done — 488 tests |
 | Golden datasets with expected outputs | Done for synthetic and simulator data; **no real-car dataset yet** |
 | Tested on a full simulator session | Done — see below |
 | Lap detection, distance alignment, delta | Done |

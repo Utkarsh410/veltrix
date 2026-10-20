@@ -15,6 +15,7 @@ MAT, CAN logs with a DBC); `veltrix formats` lists them.
   veltrix inspect session.csv --export out/
   veltrix report session.csv -o session.html
   veltrix batch season/ --report --engineer every file in a folder, with an index of them
+  veltrix library scan ~/Telemetry          the session library: see cli_library.py
   veltrix importer check my_importer:IMPORTER sample.mlg    a plug-in importer against the test kit
 
 Prints what the engine read, every assumption it made, the lap table, sectors,
@@ -649,6 +650,9 @@ def main(argv=None) -> int:
     b.add_argument("--no-app-data", action="store_true", help="ignore the app's car library")
     b.add_argument("--app-data", metavar="DIR", help="read the car library from this folder instead of the app's own")
     b.set_defaults(func=batch)
+
+    from . import cli_library
+    cli_library.add_parser(sub)
 
     im = sub.add_parser("importer", help="plug-in importers: list the installed ones, or check one with the test kit")
     im.add_argument("action", choices=("list", "check"))
