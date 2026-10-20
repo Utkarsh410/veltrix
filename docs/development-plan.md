@@ -44,7 +44,7 @@ What is not there yet, and matters for every phase below:
 | 12 | Setup and vehicle-performance analysis | High | Evidence-gated setup hypotheses; iRacing setup read in part | **L** |
 | 13 | Reporting and engineering deliverables | High | HTML report with data/limits tab, Markdown and text | **M** |
 | 14 | Session management and workflow | Medium–High | Project store per folder; no session library | **L** |
-| 15 | Extensible importers and integrations | Medium–High | Ten importers, mapping profiles; no plug-in interface, no exports | **M** |
+| 15 | Extensible importers and integrations | Medium–High | Built 2026-10-20: plug-in interface, test kit, batch mode; exports in wave D | **M** |
 | 16 | AI Race Engineer | Medium–High | Every finding already has evidence, calculation, confidence and recommendation | **M** |
 | 17 | Live telemetry and session monitoring | Medium | Nothing | **L** |
 | 18 | Collaboration and team workflows | Medium | Notes and reviews carry an author; nothing shared | **L** |
@@ -317,6 +317,22 @@ opening folders.
 
 **Done when:** an importer written against the interface by someone outside the
 core passes the importer test kit unchanged.
+
+**Status, 2026-10-20:** built.
+- The interface: `importers/plugins.py` (`Importer`, `register`, the
+  `veltrix.importers` entry points, the table contract).
+- The test kit: `importers/testkit.py`, and `veltrix importer check`.
+- Batch mode: `batch.py`, `veltrix batch` (outputs mirror the folder, with an
+  index; failures and duplicates are rows; `--jobs`).
+- The guide: [importers.md](importers.md).
+
+The example importer in `examples/importer_plugin/` uses only `Importer` and
+`RawTable` and passes the kit unchanged, in its own tests and in the engine's;
+installed as a package, it is found through its entry point. Exports to CSV,
+Parquet and MF4 were built in wave D.
+
+**Open:** a MoTeC `.ld` writer, which can't be checked against i2 here. A
+plug-in from a real third party is still to come.
 
 ### Phase 16 — AI Race Engineer (Medium–High)
 

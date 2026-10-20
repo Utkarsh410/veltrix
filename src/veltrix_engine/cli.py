@@ -14,6 +14,8 @@ MAT, CAN logs with a DBC); `veltrix formats` lists them.
   veltrix inspect session.csv --unit G_LAT=g G_LON=g
   veltrix inspect session.csv --export out/
   veltrix report session.csv -o session.html
+  veltrix batch season/ --report --engineer every file in a folder, with an index of them
+  veltrix importer check my_importer:IMPORTER sample.mlg    a plug-in importer against the test kit
 
 Prints what the engine read, every assumption it made, the lap table, sectors,
 a lap comparison and the engineering summaries the file's channels allow.
@@ -180,6 +182,60 @@ def formats(args) -> int:
         if r["remark"]:
             print(f"  {'':<{width}}  {r['remark']}")
     return 0
+
+
+def batch(args) -> int:
+    """Import every telemetry file in a folder; write the outputs asked for and an index."""
+    from .batch import find_files, run_batch, write_index
+    folder = Path(args.folder)
+    files = find_files(folder, recursive=not args.no_recursive)
+    if not files:
+        print(f"No telemetry files in {folder} (veltrix formats lists what is read).")
+        return 1
+    out_dir = Path(args.output or f"{folder.resolve()}_veltrix")
+    outputs = (("report",) if args.report else ()) + (("engineer",) if args.engineer else ()) \
+        + tuple(e if e.startswith(".") else f".{e}" for e in (args.export or ()))
+    cars_dir = None
+    if not args.no_app_data:
+        from .user_data import data_dir
+        cars_dir = Path(args.app_data or data_dir()) / "cars"
+    print(f"{len(files)} file(s) in {folder}" + (f", {args.jobs} at a time" if args.jobs > 1 else ""))
+
+    def progress(done, total, row):
+        best = f", best {fmt_time(row.best_lap_s)} (lap {row.best_lap})" if row.best_lap_s else ""
+        state = {"ok": f"{row.format}, {row.laps} laps{best}", "duplicate": row.error}.get(row.status, f"FAILED — {row.error}")
+        print(f"  [{done}/{total}] {row.file}: {state}")
+    rows = run_batch(files, root=folder, out_dir=out_dir, outputs=outputs, jobs=args.jobs, progress=progress,
+                     cars_dir=cars_dir, dbc=args.dbc or None, thresholds=args.thresholds)
+    index = write_index(rows, out_dir)
+    failed = sum(r.status == "failed" for r in rows)
+    print(f"\n{len(rows) - failed} read, {failed} failed. Index: {index[1]}")
+    return 1 if failed else 0
+
+
+def importer(args) -> int:
+    """List plug-in importers, or check one against the importer test kit."""
+    from .importers import plugins
+    if args.action == "list":
+        found, broken = plugins.registered(), plugins.failed()
+        if not found and not broken:
+            print("No plug-in importers installed. See docs/importers.md to write one.")
+        for p in found:
+            print(f"  {p.key:<20} {p.name} {p.version}  {' '.join(p.extensions)}  (interface {p.api})")
+        for name, why in broken.items():
+            print(f"  {name:<20} NOT LOADED — {why}")
+        return 0
+    if not args.importer:
+        raise ValueError("veltrix importer check MODULE[:NAME] SAMPLE...: name the importer and give sample files")
+    import importlib
+    from .importers.testkit import check_importer
+    module, _, attr = args.importer.partition(":")
+    sys.path.insert(0, str(Path.cwd()))        # a module beside the user, as written on the command line
+    target = getattr(importlib.import_module(module), attr or "IMPORTER")
+    result = check_importer(target() if callable(target) and not isinstance(target, plugins.Importer) else target,
+                            args.samples)
+    print(result.text())
+    return 0 if result.ok else 1
 
 
 def engineer(args) -> int:
@@ -579,6 +635,26 @@ def main(argv=None) -> int:
 
     th = sub.add_parser("thresholds", help="list every analysis threshold and its value")
     th.set_defaults(func=list_thresholds)
+
+    b = sub.add_parser("batch", help="import every telemetry file in a folder: an index, and reports or exports of each")
+    b.add_argument("folder")
+    b.add_argument("-o", "--output", metavar="DIR", help="where outputs and the index go (default: <folder>_veltrix)")
+    b.add_argument("--report", action="store_true", help="an HTML report of each file")
+    b.add_argument("--engineer", action="store_true", help="the engineering report of each file, as Markdown")
+    b.add_argument("--export", nargs="*", metavar="EXT", help="export each session: csv, parquet and/or mf4")
+    b.add_argument("--no-recursive", action="store_true", help="only the folder itself, not its sub-folders")
+    b.add_argument("--jobs", type=int, default=1, help="files imported side by side (each takes its own memory)")
+    b.add_argument("--dbc", nargs="*", metavar="FILE", help="DBC file(s) for CAN logs (default: the .dbc beside each)")
+    b.add_argument("--thresholds", metavar="FILE", help="JSON file overriding analysis thresholds")
+    b.add_argument("--no-app-data", action="store_true", help="ignore the app's car library")
+    b.add_argument("--app-data", metavar="DIR", help="read the car library from this folder instead of the app's own")
+    b.set_defaults(func=batch)
+
+    im = sub.add_parser("importer", help="plug-in importers: list the installed ones, or check one with the test kit")
+    im.add_argument("action", choices=("list", "check"))
+    im.add_argument("importer", nargs="?", metavar="MODULE[:NAME]", help="for check: the Importer (default name IMPORTER)")
+    im.add_argument("samples", nargs="*", help="for check: sample files of the format")
+    im.set_defaults(func=importer)
 
     f = sub.add_parser("formats", help="list the file formats the engine reads")
     f.set_defaults(func=formats)

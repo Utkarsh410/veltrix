@@ -299,6 +299,27 @@ fixed point per corner, taken from a typical lap.
   and as a PDF. A saved spec builds exactly the same document again.
 - **Export**: the session's channels with their units, for other tools.
 
+## A folder of files at once
+
+    veltrix batch season_2026/ --report --engineer      # an HTML report and the engineering report of each
+    veltrix batch season_2026/ --export parquet --jobs 4
+    veltrix batch season_2026/ -o out/ --no-recursive
+
+Every telemetry file in the folder (and its sub-folders) is imported. The outputs
+go to `<folder>_veltrix/` (or `-o`), laid out like the folder. `index.md` and
+`index.csv` list every file: format, venue, car, driver, laps, best lap, what was
+written, and why a file failed. One bad file is its own row; the rest still run.
+A file whose content is the same as another's is read once and marked as a
+duplicate. `--jobs` imports several files side by side, and each one takes its
+own memory (up to about 1.2 GB for a 260 MB CSV).
+
+## Formats from other software
+
+A format the engine doesn't read can be added as a plug-in, written against
+the importer interface: see [importers.md](importers.md). `veltrix importer
+list` shows the plug-ins installed, and `veltrix importer check MODULE SAMPLE`
+runs the importer test kit on one.
+
 ## The car library
 
 Several figures need the car's own numbers — wheelbase, steering ratio, mass,

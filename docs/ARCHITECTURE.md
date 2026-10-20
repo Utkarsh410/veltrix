@@ -88,6 +88,15 @@ channel's rate. Three things an importer may pass on besides the table:
 (`{channel id: column}` for channels the format itself identifies, such as
 iRacing's tyre temperatures, which no name matching would find).
 
+Formats from outside the engine are plug-ins (`importers/plugins.py`): an
+`Importer` registered in code or through the `veltrix.importers` entry point.
+Detection tries them after the formats that sign their files and before the
+guesses from names and text. Their tables are checked against the same
+contract (`check_table`) before anything else sees them, and
+`importers/testkit.py` is the test every importer passes. The guide is
+[importers.md](importers.md). `batch.py` runs the import (and the report,
+engineering report or export) over a folder, one process per file when asked.
+
 An importer decodes only what is the format's own encoding (a clock written as
 HHMMSS, coordinates in minutes). Units and signs are still converted in one
 place, `session.py`.

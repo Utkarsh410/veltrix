@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "veltrix-example-logger"
+version = "1.0.0"
+description = "Example of a Veltrix importer plug-in: reads the imaginary Example Logger's .elg files"
+requires-python = ">=3.10"
+dependencies = ["veltrix-engine", "numpy", "pandas"]
+
+# how the engine finds the importer once this package is installed
+[project.entry-points."veltrix.importers"]
+example_logger = "veltrix_example_logger:IMPORTER"
+
+[tool.setuptools]
+packages = ["veltrix_example_logger"]

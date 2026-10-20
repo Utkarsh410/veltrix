@@ -27,6 +27,10 @@ Any of them may be gzip-compressed (`.gz`). A file is recognised by its content,
 not only its name. `veltrix formats` lists the formats and says which optional
 readers are installed; `pip install -e ".[all]"` installs all of them.
 
+Other formats can be added as plug-ins, without changing the engine: see
+[docs/importers.md](docs/importers.md) and the example in `examples/importer_plugin/`.
+A whole folder is imported with `veltrix batch FOLDER --report`.
+
 A CAN log holds frames, not channels, so it needs its DBC: pass `--dbc car.dbc`
 (or `dbc=` in Python), or keep the `.dbc` in the same folder as the log.
 
@@ -266,7 +270,7 @@ docs/                  BRIEF.md (the build plan), implementation-roadmap.md (sta
 
 [User guide](docs/user-guide.md) · [technical reference](docs/technical-reference.md) ·
 [data model](docs/data-model.md) · [maths channels](docs/maths-channels.md) ·
-[MDF compatibility](docs/mdf-compatibility.md) · [performance](docs/performance.md) ·
+[MDF compatibility](docs/mdf-compatibility.md) · [writing an importer](docs/importers.md) · [performance](docs/performance.md) ·
 [packaging route](docs/packaging.md) · [roadmap and status](docs/implementation-roadmap.md)
 
 ## Status
@@ -280,7 +284,7 @@ Foundation phase of the product plan:
 |---|---|
 | Audit of the existing toolkits | Done — [docs/AUDIT.md](docs/AUDIT.md) |
 | Canonical channel schema, units and sign conventions | Done — [docs/CHANNEL_SCHEMA.md](docs/CHANNEL_SCHEMA.md) |
-| Core calculations extracted and tested | Done — 430 tests |
+| Core calculations extracted and tested | Done — 463 tests |
 | Golden datasets with expected outputs | Done for synthetic and simulator data; **no real-car dataset yet** |
 | Tested on a full simulator session | Done — see below |
 | Lap detection, distance alignment, delta | Done |

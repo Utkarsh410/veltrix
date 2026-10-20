@@ -14,6 +14,9 @@ RawTable — the same thing whatever the format was.
   MATLAB .mat          mat            v7.3 needs h5py
   CAN .asc .log .trc   can            decoded with a DBC; .blf needs python-can
   DBC .dbc             dbc            the database a CAN log is decoded with
+
+Other formats are added as plug-ins through the importer interface
+(plugins.py) and checked with the importer test kit (testkit.py).
 """
 
 from __future__ import annotations
@@ -29,17 +32,19 @@ from pathlib import Path
 
 import numpy as np
 
-from . import aim, can, dbc, iracing, mat, mdf, motec, vbox
+from . import aim, can, dbc, iracing, mat, mdf, motec, plugins, vbox
 from .csv_importer import parse_csv_text, read_csv
 from .dbc import Dbc, read_dbc
 from .table import RawTable, Signal, signals_to_table
 from ..errors import FileFormatError, VeltrixError
 from .mdf import ImportCancelled
+from .plugins import API_VERSION, Importer, check_table, register, registered, unregister
 
 log = logging.getLogger("veltrix.import")
 
-__all__ = ["inspect_file", "FORMATS", "Dbc", "RawTable", "Signal", "detect_format", "parse_csv_text", "read_csv", "read_dbc",
-           "read_file", "signals_to_table", "supported_extensions", "supported_formats"]
+__all__ = ["API_VERSION", "inspect_file", "FORMATS", "Dbc", "Importer", "RawTable", "Signal", "check_table", "detect_format",
+           "parse_csv_text", "read_csv", "read_dbc", "read_file", "register", "registered", "signals_to_table",
+           "supported_extensions", "supported_formats", "unregister"]
 
 
 @dataclass(frozen=True)
@@ -79,7 +84,8 @@ _CANDUMP_LINE = re.compile(r"^\(\d+\.\d+\)\s+\S+\s+[0-9A-Fa-f]+#", re.M)
 
 def supported_extensions() -> list:
     """Every file extension read_file accepts, for file pickers and upload filters."""
-    return sorted({e for f in FORMATS for e in f.extensions} | {".gz", ".ldx"})
+    return sorted({e for f in FORMATS for e in f.extensions} | {".gz", ".ldx"}
+                  | {e for p in plugins.registered() for e in p.extensions})
 
 
 def supported_formats() -> list:
@@ -90,6 +96,13 @@ def supported_formats() -> list:
         ready = not f.needs or importlib.util.find_spec(f.needs) is not None
         rows.append({"format": f.name, "extensions": " ".join(f.extensions), "ready": ready,
                      "install": "" if ready else f"pip install 'veltrix-engine[{f.extra}]'", "remark": f.remark})
+    for p in plugins.registered():
+        rows.append({"format": p.name, "extensions": " ".join(p.extensions), "ready": True, "install": "",
+                     "remark": f"plug-in '{p.key}' {p.version}".rstrip() + (f" — {p.remark}" if p.remark else ""),
+                     "plugin": p.key})
+    for name, why in plugins.failed().items():
+        rows.append({"format": name, "extensions": "", "ready": False, "install": "",
+                     "remark": f"plug-in not loaded — {why}", "plugin": name})
     return rows
 
 
@@ -106,6 +119,9 @@ def detect_format(name: str, head: bytes) -> str:
         return "xrk"
     if suffix != ".ld" and iracing.looks_like_ibt(head):
         return "ibt"
+    plugin = plugins.claim(name, head)        # after the formats that sign their files, before guesses from names and text
+    if plugin is not None:
+        return f"plugin:{plugin.key}"
     if suffix in _BY_EXTENSION and suffix not in (".asc", ".trc"):
         return _BY_EXTENSION[suffix]
     if suffix == "" and motec.looks_like_ld(head) and b"\0" in head[8:64]:
@@ -235,6 +251,32 @@ def read_file(path: str | Path, dbc=None, channels=None, progress=None, cancel=N
     return table
 
 
+def _read_plugin(importer, path: Path, zipped: bool) -> RawTable:
+    """A plug-in reads a file on disk: a .gz one is unpacked to a temporary file first."""
+    import shutil
+    import tempfile
+    try:
+        if zipped:
+            with tempfile.TemporaryDirectory() as tmp:
+                plain = Path(tmp) / path.stem
+                with gzip.open(path, "rb") as src, open(plain, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                table = plugins.read_with(importer, plain)
+        else:
+            table = plugins.read_with(importer, path)
+    except (VeltrixError, OSError, ImportCancelled, KeyboardInterrupt):
+        raise
+    except ValueError as e:                   # the importer's own refusal: its reason is the message
+        log.info("the %s importer refused %s: %s", importer.key, path, e)
+        raise FileFormatError(f"{path.name}: {e} (read by the {importer.name} importer, a plug-in)") from e
+    except Exception as e:                    # what a plug-in trips over is the plug-in's to report, named as such
+        log.exception("the %s importer failed on %s", importer.key, path)
+        raise FileFormatError(f"{path.name} could not be read by the {importer.name} importer (a plug-in"
+                              + (f", {importer.version}" if importer.version else "") + f"): {type(e).__name__}: {e}") from e
+    table.source, table.sha256 = path.name, _sha256_of(path)
+    return table
+
+
 def _read_file(path, dbc=None, channels=None, progress=None, cancel=None) -> RawTable:
     path = Path(path)
     with open(path, "rb") as f:
@@ -255,6 +297,8 @@ def _read_file(path, dbc=None, channels=None, progress=None, cancel=None) -> Raw
     if not head:
         raise FileFormatError(f"{path.name} is empty.")
     kind = detect_format(name, head)
+    if kind.startswith("plugin:"):
+        return _read_plugin(plugins.get(kind.split(":", 1)[1]), path, zipped)
     if kind == "csv":                         # parsed straight from the file: never held in memory as text
         table = read_csv(path)
         _label_csv(table)

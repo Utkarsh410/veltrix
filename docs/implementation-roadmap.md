@@ -492,6 +492,23 @@ All four priorities (P0–P3) of the user's improvement list are done.
   `tests/test_reference_session.py`. Golden outputs refrozen: rounding only, plus one tyre sample on the
   synthetic set that now falls inside its window. `pytest -m real` unchanged.
 
+## Phase 15 (importers and batch) — what was built, 2026-10-20
+
+- `importers/plugins.py`: `Importer` (key, name, extensions, read, sniff, version, api), `register`, `unregister`,
+  entry points in the group `veltrix.importers` (loaded once; a broken one goes in `failed()`, never fatal),
+  `VELTRIX_NO_PLUGINS`, `check_table` (the contract), `read_with`. Detection order: the formats that sign their
+  files, then plug-ins, then name and text guesses. An extension shared with a built-in format needs a sniff.
+  A plug-in's errors become FileFormatErrors that name the importer.
+- `importers/testkit.py`: `check_importer` / `assert_importer` (registration, detection without claiming others'
+  files, contract, determinism, session with laps, damaged copies refused within 30 s); `veltrix importer
+  list|check`.
+- `batch.py`: `find_files`, `run_batch` (report, engineer, .csv/.parquet/.mf4; duplicates by SHA-256 read once;
+  `jobs` processes, which take the thresholds file and the parent's log), `write_index` (index.csv, index.md);
+  `veltrix batch`.
+- `examples/importer_plugin/`: the Example Logger `.elg` importer, a separate package with an entry point, using
+  only `Importer` and `RawTable`. Tests: `tests/test_importer_plugins.py` (26), `tests/test_batch.py` (7).
+- Docs: `docs/importers.md`; the user guide, ARCHITECTURE and README updated.
+
 ## Open items carried forward
 
 | Item | Rule | Planned in |
