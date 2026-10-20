@@ -293,10 +293,21 @@ def report(args) -> int:
         extra = f", {made} maths channel(s), {len(s.model.events)} candidate event(s), {done['notes']} note(s) from the app"
         for line in done["problems"]:
             print(f"Note: {line}", file=sys.stderr)
-    out = write_report(s, args.output or f"{file_stem(args.file)}_report.html", title=args.title)
+    out = Path(args.output or f"{file_stem(args.file)}_report.html")
+    links = []
+    if args.documents:
+        from .report.documents import write_documents
+        stem = out.parent / (out.name[:-len("_report.html")] if out.name.endswith("_report.html") else out.stem)
+        written, problems = write_documents(s, stem, pdf=not args.no_pdf)
+        links = [(label, path.name) for label, path in written]
+        for line in problems:
+            print(f"Note: {line}", file=sys.stderr)
+    out = write_report(s, out, title=args.title, links=links)
     warnings = len(s.warnings())
     print(f"Report written to {out}  ({out.stat().st_size / 1024:.0f} KB, {len(s.laps)} laps, "
           f"{warnings} warning{'s' if warnings != 1 else ''} from the import{extra})")
+    if links:
+        print("Documents: " + ", ".join(href for _, href in links))
     return 0
 
 
@@ -670,6 +681,9 @@ def main(argv=None) -> int:
     r.add_argument("--no-app-data", action="store_true",
                    help="leave out the maths channels, event rules and notes made in the desktop app")
     r.add_argument("--app-data", metavar="DIR", help="read those from this folder instead of the app's own")
+    r.add_argument("--documents", action="store_true",
+                   help="also write the debrief (HTML and PDF) and the coaching cards beside it, linked from the report")
+    r.add_argument("--no-pdf", action="store_true", help="with --documents: no PDF")
     r.set_defaults(func=report)
 
     e = sub.add_parser("engineer", help="the engineering report: lap potential, driver, braking, cornering, traction, "

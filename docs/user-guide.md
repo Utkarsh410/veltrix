@@ -253,11 +253,16 @@ of the layout still opens.
 
 ```bash
 .venv/bin/veltrix report path/to/session.csv -o session.html
+.venv/bin/veltrix report path/to/session.csv -o session_report.html --documents   # with the debrief and coaching cards
 .venv/bin/veltrix engineer path/to/session.csv --markdown report.md
 ```
 
 **File ▸ Make report…** (⌘P) in the app writes the open session's report and
-opens it. Either way the report includes your maths channels, the events found
+opens it. The app, **Veltrix Report.app** and `--documents` also write the
+debrief (HTML, and an A4 PDF to print or send) and the coaching cards beside
+the report, and link them from the top of it. A document that can't be made
+(coaching cards need enough laps for corners) is reported, and the report
+still comes. Either way the report includes your maths channels, the events found
 with your rules, and your notes for that file (`--no-app-data` on the command
 line leaves them out).
 

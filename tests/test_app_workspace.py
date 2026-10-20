@@ -793,6 +793,8 @@ def test_a_report_made_from_the_app_or_the_command_line_carries_maths_events_and
     html = out.read_text()
     assert opened == [str(out)] and "sqrt(acc_lat^2 + acc_long^2)" in html and "Tail wind on the straight" in html
     assert "CombinedG" in s.frame(), "and the maths channel can be compared lap against lap in it"
+    assert (tmp_path / "from_app_debrief.html").exists() and (tmp_path / "from_app_coaching.html").exists()
+    assert '<a href="from_app_debrief.html">Debrief</a>' in html
     w.close()
 
     target = tmp_path / "from_cli.html"                     # the same file, later, from Terminal

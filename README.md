@@ -68,8 +68,10 @@ The window has:
 - video beside the data: playing it moves the cursor, moving the cursor seeks it. Sync is a manual
   offset or a fit to anchors, with the residuals shown; a sync that has not been checked says so.
 
-It has been driven by tests offscreen, including a full walk-through on a 79-minute session, but
-and by hand on a real display; video only with a clip the tests encode themselves. See
+It is used by hand on a real display, and the tests also drive it offscreen, including a full
+walk-through on a 79-minute session. Video has only been tried with a clip the tests encode
+themselves. Coaching cards, comparisons, documents, exports, batch mode and the session library are
+command-line features so far (see below); the app's views for them wait for a reference layout. See
 [docs/implementation-roadmap.md](docs/implementation-roadmap.md).
 
 ## Workspace (browser)
@@ -129,7 +131,9 @@ sh tools/build_mac_app.sh        # once; builds "Veltrix Report.app" in this fol
 
 Drag **Veltrix Report.app** to the Dock or Desktop. Double-click it to pick
 telemetry files, or drop files of any supported format onto it. Each file's report is written to
-`reports/` and opens in the browser. The app remembers where this folder is, so
+`reports/` and opens in the browser. Beside it go the debrief (HTML, and a PDF to print or send) and
+the coaching cards, linked from the top of the report. From Terminal the same is
+`veltrix report FILE --documents`. The app remembers where this folder is, so
 build it again if the folder moves.
 
 ## Quick start
@@ -286,7 +290,7 @@ Foundation phase of the product plan:
 |---|---|
 | Audit of the existing toolkits | Done — [docs/AUDIT.md](docs/AUDIT.md) |
 | Canonical channel schema, units and sign conventions | Done — [docs/CHANNEL_SCHEMA.md](docs/CHANNEL_SCHEMA.md) |
-| Core calculations extracted and tested | Done — 488 tests |
+| Core calculations extracted and tested | Done — 491 tests |
 | Golden datasets with expected outputs | Done for synthetic and simulator data; **no real-car dataset yet** |
 | Tested on a full simulator session | Done — see below |
 | Lap detection, distance alignment, delta | Done |

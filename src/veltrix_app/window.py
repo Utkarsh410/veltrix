@@ -319,22 +319,31 @@ class MainWindow(SessionCharts, QtWidgets.QMainWindow):
         if path:
             self.make_report(path)
 
-    def make_report(self, path: str | Path, open_after: bool = True) -> Path | None:
+    def make_report(self, path: str | Path, open_after: bool = True, documents: bool = True) -> Path | None:
         """Write the open session's report — its maths channels, the events
-        found and your notes included — and open it in the browser."""
+        found and your notes included — and open it in the browser. Beside it
+        go the debrief (HTML and PDF) and the coaching cards, linked from the
+        report."""
         if self.session is None:
             return None
         from veltrix_engine import maths as maths_engine
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
             maths_engine.on_view(self.session, self.maths.results)      # so maths channels are in the lap comparison too
-            out = write_report(self.session, path)
+            path, links, problems = Path(path), [], []
+            if documents:
+                from veltrix_engine.report.documents import write_documents
+                stem = path.parent / (path.name[:-len("_report.html")] if path.name.endswith("_report.html") else path.stem)
+                written, problems = write_documents(self.session, stem)
+                links = [(label, p.name) for label, p in written]
+            out = write_report(self.session, path, links=links)
         except (ValueError, KeyError, OSError) as e:
             QtWidgets.QApplication.restoreOverrideCursor()
             QtWidgets.QMessageBox.warning(self, "Could not write the report", str(e))
             return None
         QtWidgets.QApplication.restoreOverrideCursor()
-        self.statusBar().showMessage(f"Report written to {out}")
+        self.statusBar().showMessage(f"Report written to {out}" + (f" with {len(links)} document(s)" if links else "")
+                                     + (f" — not made: {'; '.join(problems)}" if problems else ""))
         if open_after:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(out)))
         return out

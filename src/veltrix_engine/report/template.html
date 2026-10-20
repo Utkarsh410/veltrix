@@ -38,6 +38,8 @@ section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
 .strip { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 12.5px/1.5 var(--mono); color: var(--muted); }
 .strip b { color: var(--fg); font-weight: 500; }
+.docs { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }
+.docs a { color: var(--fg); }
 .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border-block: 1px solid var(--rule); }
 .fig { padding: 16px 18px 16px 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .fig .v { font: 600 28px/1.1 var(--display); font-variant-numeric: tabular-nums; }
@@ -165,6 +167,7 @@ dl.narrow { max-width: 560px; }
     <div class="eyebrow">Veltrix Data · session dashboard</div>
     <h1 id="title"></h1>
     <div class="strip" id="strip"></div>
+    __LINKS__
   </header>
 
   <div class="bar" data-needs="cmp">

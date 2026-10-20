@@ -172,3 +172,30 @@ def build(spec: dict, load=None) -> str:
 
 def digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def write_documents(session, stem: str | Path, pdf: bool = True) -> tuple[list, list]:
+    """The debrief (HTML, and PDF when it can be made) and the coaching cards,
+    written as <stem>_debrief.html/.pdf and <stem>_coaching.html. Returns
+    ([(label, path)], [problem]); a document that cannot be made is a problem,
+    never a failure of the others."""
+    stem = Path(stem)
+    stem.parent.mkdir(parents=True, exist_ok=True)
+    written, problems = [], []
+    pages = (("Debrief", "debrief", debrief_html), ("Coaching cards", "coaching", driver_card_html))
+    for label, suffix, make in pages:
+        try:
+            page = make(session)
+        except Exception as e:                    # e.g. too few laps for corners: the rest still come
+            problems.append(f"{label}: {e}")
+            continue
+        out = stem.parent / f"{stem.name}_{suffix}.html"
+        out.write_text(page, encoding="utf-8")
+        written.append((label, out))
+        if pdf and suffix == "debrief":
+            from .pdf import html_to_pdf
+            try:
+                written.append(("Debrief (PDF)", html_to_pdf(page, out.with_suffix(".pdf"))))
+            except RuntimeError as e:
+                problems.append(str(e))
+    return written, problems

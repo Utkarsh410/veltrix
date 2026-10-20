@@ -11,7 +11,7 @@ done before its "done when" holds and its tests pass.
 | 0 Audit | done 2026-10-12 | [architecture-audit.md](architecture-audit.md), [testing-strategy.md](testing-strategy.md), [data-model.md](data-model.md); baseline 208 tests passing |
 | 1 Canonical session model | done 2026-10-12 | `model.py`, `model_build.py`, `model_store.py`; 226 tests passing; reference session unchanged (best 122.330 s, ideal 120.730 s) |
 | 2 Maths-channel engine | done: engine 2026-10-12, full editor window 2026-10-13 (channel browser, function reference, live validation with error position, preview plot, parameters, dependency and provenance view, persistence). Maths channels in command-line reports still pending | `maths/` (parser, units, evaluate, engine), [maths-channels.md](maths-channels.md); 269 tests passing; seven fixtures on the reference session in 53 ms |
-| 3 Interactive workspace | "done when" walk-through passes on the reference session, offscreen (2026-10-12); **outstanding items listed below; never used on a real display** | `veltrix_app/`, `tests/test_app_*.py`, walkthrough in `tests/test_reference_session.py`; 296 tests passing |
+| 3 Interactive workspace | "done when" walk-through passes on the reference session, offscreen (2026-10-12); used by hand on a real display since (confirmed by the user); outstanding items listed below | `veltrix_app/`, `tests/test_app_*.py`, walkthrough in `tests/test_reference_session.py`; 296 tests passing |
 | 4 MF4/MDF import | "done when" met on generated files (2026-10-12): opens, maps through a profile, analyses, reopens the same from the store; damaged files fail with a reason; large-file benchmark recorded. **No file from a real logger has been tested** | [mdf-compatibility.md](mdf-compatibility.md), `importers/mdf.py`, `mapping_profiles.py`, `veltrix_app/mapping_dialog.py`; 308 tests passing |
 | 5 Synchronised video | "done when" met with a synthetic video (2026-10-12): offset persists, playback drives the cursor and the cursor seeks the video, sync status and residuals shown, app works with no video or a missing file. **No real camera footage tested** | `veltrix_app/video_sync.py`, `video_dock.py`, `tests/test_video_sync.py`; 316 tests passing |
 | 6 Events, reports, hardening | built 2026-10-12: configurable event engine, hypothesis-structured and evidence-gated setup advice, report data/events/limits tab, four end-to-end paths, profiling, configurable thresholds, user guide and technical reference. **Packaging is a documented route only; nothing is validated on real-car data or a real display** | `events.py`, `thresholds.py`, `tests/test_events.py`, `tests/test_end_to_end.py`, [performance.md](performance.md), [packaging.md](packaging.md), [user-guide.md](user-guide.md), [technical-reference.md](technical-reference.md); 332 tests passing |
@@ -526,6 +526,15 @@ All four priorities (P0–P3) of the user's improvement list are done.
 - Dates: header, day first; a date in the file or folder name settles which way round; else the file time.
 - Tests: `tests/test_library.py` (25). Real sessions: Hungaroring 1:50.498 / ideal 1:48.911, Nürburgring
   2:02.330 / 2:00.730, Spa 2:44.741 / 2:42.806.
+
+## The apps catch up: documents with every report — 2026-10-20
+
+- `veltrix report --documents` (`--no-pdf`), `report.documents.write_documents`: the debrief (HTML and PDF)
+  and the coaching cards beside the report, linked from its header (`render_report(links=…)`).
+- Veltrix Report.app passes `--documents` (rebuild with `tools/build_mac_app.sh`); the desktop app's
+  File ▸ Make report… writes them too. A PDF adds about 3 s warm (the first one starts Qt's web engine).
+- README and the status table: the desktop app is used by hand on a real display (confirmed by the user).
+- Still command-line only: compare, batch, the session library, exports. Their views wait for a reference.
 
 ## Open items carried forward
 

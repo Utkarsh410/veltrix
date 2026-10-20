@@ -1,6 +1,8 @@
 #!/bin/sh
 # Build "Veltrix Report.app": double-click it (or drop telemetry files on it) to
-# build a session report and open it — no Terminal needed.
+# build a session report and open it — no Terminal needed. Beside each report
+# it writes the debrief (HTML and PDF) and the coaching cards, linked from the
+# report's header.
 #
 #   sh tools/build_mac_app.sh
 #
@@ -41,7 +43,7 @@ on buildReports(theFiles)
 		display notification "Analysing " & shortName & "…" with title "Veltrix Report"
 		try
 			set outFile to do shell script "mkdir -p " & quoted form of (engineDir & "/reports") & " && n=\$(basename " & quoted form of src & " | sed -e 's/\\\\.gz\$//' -e 's/\\\\.[^.]*\$//') && echo " & quoted form of (engineDir & "/reports/") & "\"\$n\"_report.html"
-			do shell script quoted form of tool & " report " & quoted form of src & " -o " & quoted form of outFile & " 2>&1"
+			do shell script quoted form of tool & " report " & quoted form of src & " -o " & quoted form of outFile & " --documents 2>&1"
 			do shell script "open " & quoted form of outFile
 		on error msg
 			display dialog "Could not build a report for " & shortName & ":" & return & return & msg buttons {"OK"} default button 1 with icon caution with title "Veltrix Report"
