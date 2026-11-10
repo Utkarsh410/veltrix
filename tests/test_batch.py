@@ -21,9 +21,9 @@ def folder(tmp_path):
     shutil.copy(GOLDEN / "synthetic_gt3_5lap.csv.gz", root / "round2" / "race.csv.gz")
     shutil.copy(GOLDEN / "logger_layout_3lap_20hz.csv", root / "round2" / "practice_again.csv")
     (root / "round2" / "broken.ibt").write_bytes(b"\x02\x00\x00\x00" + b"\x00" * 200)
-    (root / "notes.md").write_text("not telemetry")
-    (root / "car.dbc").write_text('VERSION ""\nBU_: ECU\n')
-    (root / ".hidden.csv").write_text("Time,Speed\n0,1\n")
+    (root / "notes.md").write_text("not telemetry", encoding="utf-8")
+    (root / "car.dbc").write_text('VERSION ""\nBU_: ECU\n', encoding="utf-8")
+    (root / ".hidden.csv").write_text("Time,Speed\n0,1\n", encoding="utf-8")
     return root
 
 
@@ -55,12 +55,12 @@ def test_a_batch_reads_every_file_and_a_bad_one_is_only_its_own_row(folder, tmp_
 def test_the_index_has_a_row_per_file(folder, tmp_path):
     rows = run_batch(find_files(folder), root=folder)
     csv_path, md_path, html_path = write_index(rows, tmp_path / "out")
-    page = html_path.read_text()
+    page = html_path.read_text(encoding="utf-8")
     assert page.count("<tr class='ok'>") == 2 and "<tr class='failed'>" in page and "broken.ibt" in page
     table = list(csv.DictReader(open(csv_path, encoding="utf-8")))
     assert [r["status"] for r in table] == ["ok", "failed", "duplicate", "ok"]
     assert table[0]["venue"] == "Synthetic Circuit" and table[0]["laps"] == "3" and len(table[0]["sha256"]) == 64
-    assert "2 read, 1 failed, 1 duplicate(s)." in md_path.read_text()
+    assert "2 read, 1 failed, 1 duplicate(s)." in md_path.read_text(encoding="utf-8")
 
 
 def test_files_in_parallel_give_the_same_rows(folder):
@@ -97,7 +97,7 @@ def test_the_reports_command_writes_each_report_with_its_documents_and_an_index(
     names = {p.name for p in out.iterdir()}
     assert {"logger_layout_3lap_20hz_report.html", "logger_layout_3lap_20hz_debrief.html",
             "synthetic_gt3_5lap_coaching.html", "index.html"} <= names
-    report = (out / "synthetic_gt3_5lap_report.html").read_text()
+    report = (out / "synthetic_gt3_5lap_report.html").read_text(encoding="utf-8")
     assert '<a href="synthetic_gt3_5lap_debrief.html">Debrief</a>' in report
     assert "2 report(s), 0 failed" in capsys.readouterr().out
     with pytest.raises(SystemExit):

@@ -24,7 +24,7 @@ def write_session(path: Path, venue: str, car: str, driver: str, day: str, seed:
     path.parent.mkdir(parents=True, exist_ok=True)
     header = (f'"Format","Logger CSV File"\n"Venue","{venue}"\n"Vehicle","{car}"\n"Driver","{driver}"\n'
               f'"Log Date","{day}"\n"Log Time","10:00:00"\n\n')
-    path.write_text(header + frame.to_csv(index=False, float_format="%.3f"))
+    path.write_text(header + frame.to_csv(index=False, float_format="%.3f"), encoding="utf-8")
     return path
 
 
@@ -264,7 +264,7 @@ def test_the_command_line_finds_filters_groups_and_compares(tmp_path, season, ca
     assert "Lap: faster" in capsys.readouterr().out
     assert main([*lib, "show", "6"]) == 0 and "Driver B" in capsys.readouterr().out
     assert main([*lib, "list", "--csv", str(tmp_path / "season.csv")]) == 0
-    assert (tmp_path / "season.csv").read_text().count("\n") == 7
+    assert (tmp_path / "season.csv").read_text(encoding="utf-8").count("\n") == 7
     assert main([*lib, "forget", "6"]) == 0 and (season / "spa" / "race.csv").exists()
     assert main([*lib, "list"]) == 0 and "5 session(s)" in capsys.readouterr().out
 

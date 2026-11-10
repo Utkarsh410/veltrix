@@ -17,7 +17,7 @@ def _same_laps(a, b, tol=0.06):
 
 def test_a_csv_export_names_its_units_and_imports_back_the_same(synthetic, tmp_path):
     out = export_session(synthetic, tmp_path / "s.csv")
-    head = out.read_text().splitlines()[:2]
+    head = out.read_text(encoding="utf-8").splitlines()[:2]
     names, units = head[0].split(","), head[1].split(",")
     assert names[:3] == ["time", "lap", "lap_distance"] and units[names.index("speed")] == "km/h"
     again = load_session(out)

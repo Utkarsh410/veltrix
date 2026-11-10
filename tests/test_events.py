@@ -114,7 +114,7 @@ def test_thresholds_are_parameters_and_rules_are_data(tmp_path):
     assert of(ev, "wheelspin") == [] and report["wheelspin"]["message"] == "none found"
     back = events.RuleSet.load(rules.save(tmp_path / "rules.json"))
     assert back.to_dict() == rules.to_dict() and back.parameters["spin_on"] == 20.0
-    assert json.loads((tmp_path / "rules.json").read_text())["rules"][0]["on"].startswith("throttle > $spin_throttle")
+    assert json.loads((tmp_path / "rules.json").read_text(encoding="utf-8"))["rules"][0]["on"].startswith("throttle > $spin_throttle")
 
     mine = events.RuleSet([events.Rule("full_throttle", "Full throttle", "throttle > $limit", min_duration_s=1.0,
                                        evidence=("speed",), version=3)], {"limit": 95.0})

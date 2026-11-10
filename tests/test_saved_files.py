@@ -23,7 +23,7 @@ from veltrix_engine.user_data import AnnotationStore
 from veltrix_engine.versions import upgrade
 
 RELEASE_1 = Path(__file__).parent / "fixtures" / "saved_release_1"
-SHA = (RELEASE_1 / "SOURCE").read_text().split()[1]
+SHA = (RELEASE_1 / "SOURCE").read_text(encoding="utf-8").split()[1]
 
 
 @pytest.fixture
@@ -81,10 +81,10 @@ def test_an_older_project_schema_is_brought_up_to_date(saved):
 
 
 def _bump(path: Path, key: str = "version", to: int = 99) -> str:
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     data[key] = to
-    path.write_text(json.dumps(data))
-    return path.read_text()
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("name, read", [
@@ -111,7 +111,7 @@ def test_stores_neither_read_nor_overwrite_a_newer_file(saved):
         events.ReviewStore(saved / "reviews").load(SHA)
     with pytest.raises(VersionError):
         events.ReviewStore(saved / "reviews").save(SHA, [])
-    assert notes.read_text() == kept_notes and reviews.read_text() == kept_reviews, "a newer file is left as it was"
+    assert notes.read_text(encoding="utf-8") == kept_notes and reviews.read_text(encoding="utf-8") == kept_reviews, "a newer file is left as it was"
     with pytest.raises(VersionError):
         thresholds.save(_bump(saved / "thresholds.json") and saved / "thresholds.json", {})
 
@@ -157,7 +157,7 @@ def test_an_unreadable_file_is_one_named_error_and_the_details_go_to_the_log(tmp
     with pytest.raises(FileNotFoundError):
         read_file(tmp_path / "missing.csv")
     nothing = tmp_path / "nothing.csv"
-    nothing.write_text("a,b\n" + "\n".join(f"{i},{i}" for i in range(50)))
+    nothing.write_text("a,b\n" + "\n".join(f"{i},{i}" for i in range(50)), encoding="utf-8")
     with pytest.raises(MappingError, match="required channel"):
         load_session(nothing)
 
@@ -186,7 +186,7 @@ def test_an_unexpected_error_in_the_app_writes_a_crash_report_and_sends_nothing(
         except RuntimeError:
             hook(*sys.exc_info())
         report = hook.last_report
-        text = report.read_text()
+        text = report.read_text(encoding="utf-8")
         assert report.parent == tmp_path / "crash_reports"
         assert "RuntimeError: something nobody expected" in text and "Veltrix Data" in text and "Python" in text
     finally:

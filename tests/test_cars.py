@@ -47,7 +47,7 @@ def test_the_library_keeps_entries_and_refuses_bad_ones(tmp_path):
     with pytest.raises(ValueError, match="Not car parameters"):
         lib.save("Toyota GR86", {"horsepower": 228})
     path = lib.save("Other", {"mass_kg": 1000.0})
-    path.write_text(path.read_text().replace('"version": 1', '"version": 9'))
+    path.write_text(path.read_text(encoding="utf-8").replace('"version": 1', '"version": 9'))
     with pytest.raises(VersionError):
         lib.save("Other", {"mass_kg": 1100.0})
     assert lib.remove("Toyota GR86") and lib.get("Toyota GR86") is None

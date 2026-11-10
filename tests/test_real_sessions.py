@@ -25,6 +25,6 @@ def test_a_real_session_gives_what_it_gave_when_frozen(key):
     frozen = EXPECTED / f"{key}.json"
     if not frozen.exists():
         pytest.skip(f"not frozen yet: run tools/freeze_real_sessions.py {key}")
-    want, got = json.loads(frozen.read_text()), json.loads(json.dumps(summary(path), default=str))
+    want, got = json.loads(frozen.read_text(encoding="utf-8")), json.loads(json.dumps(summary(path), default=str))
     for part in want:
         assert got[part] == want[part], f"{key}: {part} changed (refreeze only if the change is meant)"

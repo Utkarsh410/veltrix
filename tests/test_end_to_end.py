@@ -60,8 +60,8 @@ def test_csv_to_model_to_maths_to_lap_compare_to_events_to_report(tmp_path):
     assert any("no unit for" in t and "speed" in t for t in data["data"]["limitations"])
     assert any("candidates found by threshold rules" in t for t in data["data"]["limitations"])
     page = tmp_path / "report.html"
-    page.write_text(render_report(s))
-    html = page.read_text()
+    page.write_text(render_report(s), encoding="utf-8")
+    html = page.read_text(encoding="utf-8")
     assert 'data-tab="data"' in html and "sqrt(acc_lat^2 + acc_long^2)" in html and "Sustained high combined g" in html
     payload = json.loads(re.search(r"const D = (\{.*\});\n", html).group(1).replace("<\\/", "</"))
     assert payload["engineering"]["sections"][0]["title"] == "Lap potential"

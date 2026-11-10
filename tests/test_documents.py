@@ -50,15 +50,15 @@ def test_the_document_command_writes_html_a_spec_and_a_pdf(tmp_path, capsys):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         args += ["--pdf", str(pdf)]
     assert cli_main(args) == 0
-    page = html.read_text()
+    page = html.read_text(encoding="utf-8")
     assert "Stated: rear wing +1" in page and "Corner by corner" in page
-    assert json.loads(spec.read_text())["template"] == "comparison"
+    assert json.loads(spec.read_text(encoding="utf-8"))["template"] == "comparison"
     if pdf_mod.available():
         data = pdf.read_bytes()
         assert data.startswith(b"%PDF") and len(re.findall(rb"/Type\s*/Page[^s]", data)) >= 1
     again = tmp_path / "again.html"
     assert cli_main(["document", "--spec", str(spec), "-o", str(again)]) == 0
-    assert again.read_text() == page, "the saved spec builds the same document"
+    assert again.read_text(encoding="utf-8") == page, "the saved spec builds the same document"
 
 
 def test_the_report_command_writes_the_documents_beside_it_and_links_them(tmp_path, capsys):

@@ -35,4 +35,4 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[ui,all,dev]"
       - name: Run the tests
-        run: python -m pytest -o faulthandler_timeout=600 -p no:cacheprovider
+        run: python -m pytest -rs -o faulthandler_timeout=600 -p no:cacheprovider

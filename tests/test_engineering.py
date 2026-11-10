@@ -234,7 +234,7 @@ def test_every_stored_session_has_its_report(tmp_path, reports):
     try:
         sid = store.import_file(source)
         saved = tmp_path / "project" / "sessions" / str(sid) / "engineering.json"
-        assert json.loads(saved.read_text()) == reports["logger"] == store.engineering(sid)
+        assert json.loads(saved.read_text(encoding="utf-8")) == reports["logger"] == store.engineering(sid)
         saved.unlink()                                       # a session stored before reports existed
         assert store.engineering(sid) == reports["logger"] and saved.exists()
     finally:
@@ -249,8 +249,8 @@ def test_cli_prints_and_exports_the_report(tmp_path, capsys):
     assert cli_main(["engineer", str(GOLDEN / "monza_ac_gt3.csv.gz"), "--json", str(out_json), "--markdown", str(out_md)]) == 0
     printed = capsys.readouterr().out
     assert "LAP POTENTIAL" in printed and "SETUP HYPOTHESES" in printed and "Recommendation" in printed
-    assert [s["title"] for s in json.loads(out_json.read_text())["sections"]] == TITLES
-    assert out_md.read_text().startswith("# Performance engineering report — monza_ac_gt3.csv.gz")
+    assert [s["title"] for s in json.loads(out_json.read_text(encoding="utf-8"))["sections"]] == TITLES
+    assert out_md.read_text(encoding="utf-8").startswith("# Performance engineering report — monza_ac_gt3.csv.gz")
 
 
 def test_setup_changes_are_only_suggested_on_adequate_evidence():

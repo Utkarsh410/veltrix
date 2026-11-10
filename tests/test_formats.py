@@ -102,8 +102,8 @@ def test_j1939_identifier_matches_whatever_the_source_address():
 @pytest.mark.parametrize("name, writer", [("bus.log", fw.candump), ("bus.asc", fw.asc), ("bus_v1.trc", fw.trc_v1),
                                            ("bus_v2.trc", fw.trc_v2), ("bus.csv", fw.can_csv)])
 def test_can_log_decoded_with_dbc(tmp_path, frames, ref, logger, name, writer):
-    (tmp_path / name).write_text(writer(frames))
-    (tmp_path / "car.dbc").write_text(fw.DBC_TEXT)
+    (tmp_path / name).write_text(writer(frames), encoding="utf-8")
+    (tmp_path / "car.dbc").write_text(fw.DBC_TEXT, encoding="utf-8")
     s = load_session(tmp_path / name)                       # the DBC is found beside the log
     assert "CAN" in s.raw.format and s.raw.info["DBC"] == "car.dbc"
     want = {"speed": "Speed", "rpm": "RPM", "steering": "Steered_Angle", "gear": "Gear", "lap": "Lap_Number",
@@ -163,16 +163,16 @@ def test_blf_log(tmp_path, frames, logger):
 def _dbc_file(folder):
     path = folder / "db" / "car.dbc"
     path.parent.mkdir(exist_ok=True)
-    path.write_text(fw.DBC_TEXT)
+    path.write_text(fw.DBC_TEXT, encoding="utf-8")
     return path
 
 
 def test_can_log_without_a_dbc_says_what_is_missing(tmp_path, frames):
-    (tmp_path / "bus.asc").write_text(fw.asc(frames[:200]))
+    (tmp_path / "bus.asc").write_text(fw.asc(frames[:200]), encoding="utf-8")
     with pytest.raises(ValueError, match="needs a DBC"):
         read_file(tmp_path / "bus.asc")
     wrong = tmp_path / "other.dbc"
-    wrong.write_text('BU_: A\nBO_ 999 Other: 8 A\n SG_ x : 0|8@1+ (1,0) [0|0] "" X\n')
+    wrong.write_text('BU_: A\nBO_ 999 Other: 8 A\n SG_ x : 0|8@1+ (1,0) [0|0] "" X\n', encoding="utf-8")
     with pytest.raises(ValueError, match="right DBC"):
         read_file(tmp_path / "bus.asc", dbc=wrong)
 
@@ -181,7 +181,7 @@ def test_a_dbc_or_ldx_alone_is_not_a_session(tmp_path):
     path = _dbc_file(tmp_path)
     with pytest.raises(ValueError, match="3 messages, 9 signals"):
         read_file(path)
-    (tmp_path / "run.ldx").write_text(fw.ldx(BEACONS))
+    (tmp_path / "run.ldx").write_text(fw.ldx(BEACONS), encoding="utf-8")
     with pytest.raises(ValueError, match="Import the .ld file"):
         read_file(tmp_path / "run.ldx")
 
@@ -190,7 +190,7 @@ def test_a_dbc_or_ldx_alone_is_not_a_session(tmp_path):
 
 def test_vbox(tmp_path, ref, logger):
     path = tmp_path / "run.vbo"
-    path.write_text(fw.vbo(ref, logger.lap_length, BEACONS))
+    path.write_text(fw.vbo(ref, logger.lap_length, BEACONS), encoding="utf-8")
     s = load_session(path)
     assert s.raw.format == "VBOX .vbo"
     assert {"time": "time", "speed": "velocity kmh", "gps_lat": "latitude", "gps_lon": "longitude",
@@ -222,7 +222,7 @@ def _ld_bytes(ref):
 
 def test_motec_ld_with_ldx(tmp_path, ref, logger):
     (tmp_path / "run.ld").write_bytes(_ld_bytes(ref))
-    (tmp_path / "run.ldx").write_text(fw.ldx(BEACONS))
+    (tmp_path / "run.ldx").write_text(fw.ldx(BEACONS), encoding="utf-8")
     s = load_session(tmp_path / "run.ld")
     assert s.raw.format == "MoTeC .ld"
     assert s.raw.info["Venue"] == "Synthetic Circuit" and s.raw.info["Driver"] == "Test Driver"
@@ -470,7 +470,7 @@ def test_aim_csv_export(tmp_path, ref, logger):
             '"Beacon Markers",' + ",".join(f'"{b:.3f}"' for b in BEACONS), "",
             '"Time","GPS Speed","RPM"', '"Time","GPS Speed","RPM"', '"s","km/h","rpm"', '"1","2","3"', ""]
     body = "\n".join(f'"{r.time:.3f}","{r.speed:.3f}","{r.rpm:.1f}"' for r in cols.itertuples())
-    (tmp_path / "aim.csv").write_text("\n".join(head) + "\n" + body + "\n")
+    (tmp_path / "aim.csv").write_text("\n".join(head) + "\n" + body + "\n", encoding="utf-8")
     s = load_session(tmp_path / "aim.csv")
     assert s.raw.format == "AiM CSV" and s.raw.info["Driver"] == "Test Driver"
     assert len(s.raw.data) == len(ref), "the row of channel numbers is not a sample"
@@ -511,9 +511,9 @@ def test_every_requested_format_is_listed():
 # ── store and command line ────────────────────────────────────────────────────
 
 def test_store_keeps_the_dbc_and_the_ldx_with_the_source(tmp_path, frames, ref):
-    (tmp_path / "bus.asc").write_text(fw.asc(frames))
+    (tmp_path / "bus.asc").write_text(fw.asc(frames), encoding="utf-8")
     (tmp_path / "run.ld").write_bytes(_ld_bytes(ref))
-    (tmp_path / "run.ldx").write_text(fw.ldx(BEACONS))
+    (tmp_path / "run.ldx").write_text(fw.ldx(BEACONS), encoding="utf-8")
     store = ProjectStore(tmp_path / "project")
     try:
         can_id = store.import_file(tmp_path / "bus.asc", dbc=_dbc_file(tmp_path))
@@ -532,8 +532,8 @@ def test_store_keeps_the_dbc_and_the_ldx_with_the_source(tmp_path, frames, ref):
 
 
 def test_cli_reads_any_format(tmp_path, frames, ref, logger, capsys):
-    (tmp_path / "run.vbo").write_text(fw.vbo(ref, logger.lap_length, BEACONS))
-    (tmp_path / "bus.log").write_text(fw.candump(frames))
+    (tmp_path / "run.vbo").write_text(fw.vbo(ref, logger.lap_length, BEACONS), encoding="utf-8")
+    (tmp_path / "bus.log").write_text(fw.candump(frames), encoding="utf-8")
     assert cli_main(["formats"]) == 0
     assert "MoTeC" in capsys.readouterr().out
     assert cli_main(["report", str(tmp_path / "run.vbo"), "-o", str(tmp_path / "out.html")]) == 0

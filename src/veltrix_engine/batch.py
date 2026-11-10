@@ -97,6 +97,11 @@ def common_folder(files) -> Path:
         return parents[0]
 
 
+def _shown(path: Path, root: Path) -> str:
+    """A file as the index shows it: relative to root, with "/" on every system."""
+    return path.relative_to(root).as_posix() if path.is_relative_to(root) else path.name
+
+
 def _output_stem(path: Path, root: Path, out_dir: Path) -> Path:
     rel = path.relative_to(root) if path.is_relative_to(root) else Path(path.name)
     name = rel.name[:-3] if rel.name.lower().endswith(".gz") else rel.name
@@ -137,7 +142,7 @@ def _parent_log_dir():
 def _import_one(path: Path, root: Path, out_dir: Path | None, outputs: tuple, options: dict) -> BatchRow:
     from .session import load_session
     started = time.perf_counter()
-    row = BatchRow(file=str(path.relative_to(root)) if path.is_relative_to(root) else path.name)
+    row = BatchRow(file=_shown(path, root))
     try:
         cars = None
         if options.get("cars_dir"):
@@ -240,8 +245,7 @@ def run_batch(files, root=None, out_dir=None, outputs: tuple = (), jobs: int = 1
             rows[k] = BatchRow(file=f.name, status="failed", error=str(e))
             continue
         if sha in first_of:
-            shown = f.resolve().relative_to(root) if f.resolve().is_relative_to(root) else f.name
-            rows[k] = BatchRow(file=str(shown), status="duplicate", sha256=sha,
+            rows[k] = BatchRow(file=_shown(f.resolve(), root), status="duplicate", sha256=sha,
                                error=f"same content as {files[first_of[sha]].name}")
         else:
             first_of[sha] = k

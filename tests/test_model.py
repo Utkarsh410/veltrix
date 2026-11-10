@@ -114,7 +114,7 @@ def test_channels_keep_their_own_rate_from_a_multi_rate_log(tmp_path, logger):
     (tmp_path / "run.ld").write_bytes(fw.ld([("Ground Speed", "km/h", 20, ref["speed"], ("i2", 2)),
                                              ("Engine RPM", "rpm", 10, half["rpm"], "f4"),
                                              ("Gear", "", 5, ref["gear"].iloc[::4], ("i2", 0))]))
-    (tmp_path / "run.ldx").write_text(fw.ldx((80.660, 161.430)))
+    (tmp_path / "run.ldx").write_text(fw.ldx((80.660, 161.430)), encoding="utf-8")
     s = load_session(tmp_path / "run.ld")
     m = s.model
     assert [m.get(c).sample_rate for c in ("speed", "rpm", "gear")] == pytest.approx([20, 10, 5])
@@ -185,9 +185,9 @@ def test_model_round_trips_without_resampling(tmp_path, synthetic):
 
 def test_a_newer_model_version_is_refused_with_a_reason(tmp_path, logger):
     folder = save_model(logger.model, tmp_path / "model")
-    manifest = json.loads((folder / "manifest.json").read_text())
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
     manifest["model_version"] = 99
-    (folder / "manifest.json").write_text(json.dumps(manifest))
+    (folder / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match="newer release"):
         load_model(folder)
 
