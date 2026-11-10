@@ -826,3 +826,27 @@ def test_make_reports_for_files_writes_each_with_its_documents_and_an_index(qt, 
     assert "could not be read" in w.statusBar().currentMessage()
     assert w.session is None                                  # nothing was opened in the workspace
     w.close()
+
+
+def test_files_opened_on_the_app_icon_open_one_or_make_reports_of_several(qt, tmp_path, monkeypatch):
+    from PySide6 import QtCore, QtGui
+    from veltrix_app import reports
+    from veltrix_app.file_open import FileOpenHandler
+    from veltrix_app.window import MainWindow
+    w = MainWindow(tmp_path / "maths.json")
+    handler = FileOpenHandler(w)
+    opened, made = [], []
+    monkeypatch.setattr(w, "open_file", opened.append)
+    monkeypatch.setattr(reports, "make_reports", lambda parent, files, out_dir, data_folder: made.append((files, out_dir)))
+
+    def drop(*paths):                               # what macOS sends: one open event per file
+        for p in paths:
+            assert handler.eventFilter(qt, QtGui.QFileOpenEvent(str(p)))
+        handler.flush()
+
+    drop(LOGGER)
+    assert opened == [str(LOGGER)] and not made
+    drop(LOGGER, tmp_path / "b.csv", LOGGER)
+    assert made == [([str(LOGGER), str(tmp_path / "b.csv")], w.data_folder / "reports")]
+    assert not handler.eventFilter(qt, QtCore.QEvent(QtCore.QEvent.Type.Show))
+    w.close()

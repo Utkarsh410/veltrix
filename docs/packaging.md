@@ -1,61 +1,87 @@
-# Packaging for macOS (route, not yet done)
+# Packaging for macOS
 
-Nothing here has been built. This records the route and the choices made so
-far that keep it open.
+`sh tools/build_mac_bundle.sh` builds a self-contained **Veltrix Data.app** and a disk image
+(`dist/Veltrix-Data-<version>.dmg`). The app carries its own Python 3.12 and every library, and does
+not depend on this folder or its virtual environment. Built and checked on this Mac on 2026-11-10;
+**it is signed ad hoc, so it opens only on this Mac**, until it is signed with a Developer ID
+certificate and notarised (below).
 
-## What has to ship
+`sh tools/build_mac_app.sh` still builds the small launcher that runs this folder's code, for
+development. Both are called Veltrix Data.app; the bundle is written to `dist/`, the launcher to the
+project folder.
 
-| Part | Size, roughly | Licence | Note |
-|---|---|---|---|
-| Python 3.12 runtime | 60 MB | PSF | |
-| NumPy, pandas, SciPy, PyArrow | 350 MB | BSD / Apache-2.0 | arm64 wheels |
-| PySide6 (Qt 6.12) with Qt Multimedia | 400 MB unpacked with WebEngine; less if WebEngine is left out | LGPL-3.0 | arm64 wheels |
-| pyqtgraph | 5 MB | MIT | pure Python |
-| FFmpeg, as built into Qt Multimedia | inside PySide6 | LGPL-2.1+ build | no separate FFmpeg install is needed; video plays and the tests encode with it |
-| asammdf, python-can | small | LGPL-3.0 | optional readers |
-| libxrk, h5py | small | MIT, BSD | optional readers |
+## What it does
 
-All dependencies were checked on this machine as native arm64 (see
-[mdf-compatibility.md](mdf-compatibility.md) for asammdf; the full test suite
-runs on Apple Silicon).
+| | |
+|---|---|
+| Double-click | opens the desktop workspace |
+| Drop one file on it (or Open With) | opens that session in the workspace |
+| Drop several files on it | the workspace opens and writes a report of each, with its debrief (HTML and PDF) and coaching cards, into `~/Library/Application Support/Veltrix Data/reports`, and opens an index page |
 
-## Route
+macOS hands dropped files to a bundled app as open events, not arguments: `veltrix_app/file_open.py`
+gathers them for 0.4 s and treats them as a group. The launcher passed them as arguments to `veltrix
+app` and `veltrix reports`, and wrote reports into `reports/` in the project folder instead.
 
-1. **Bundle.** `briefcase` or `py2app` to produce `Veltrix Data.app` with the
-   interpreter and site-packages inside `Contents/Resources`, entry point
-   `veltrix_app.window:main`. PyInstaller also works but its one-file mode
-   makes the LGPL libraries hard to replace; use the one-folder mode if it is
-   chosen.
-2. **LGPL.** PySide6, asammdf and python-can must stay replaceable by the
-   user. Shipped as ordinary files inside the bundle, not statically linked
-   and not obfuscated, they are. Include their licence texts and a note on
-   where the libraries live in the bundle.
-3. **Trim.** Leave out `QtWebEngine` unless the HTML report is to be shown
-   inside the app (it currently opens in the browser), and Qt modules the app
-   does not import.
-4. **Sign.** `codesign --deep --options runtime` with a Developer ID
-   Application certificate; every `.so` and `.dylib` inside the bundle must be
-   signed, inner-most first. Hardened runtime needs the entitlement
-   `com.apple.security.cs.disable-library-validation` only if unsigned
-   third-party libraries remain.
-5. **Notarise.** `xcrun notarytool submit … --wait`, then `xcrun stapler staple`.
-6. **File types.** `CFBundleDocumentTypes` for `.csv`, `.ld`, `.ibt`, `.vbo`,
-   `.xrk`, `.mf4`, `.mat`, so files can be dropped on the icon.
+The app offers itself (`LSHandlerRank` Alternate) for every extension the engine reads, without
+becoming the default app for `.csv`, `.txt` or `.log`. The command line (`veltrix …`) is not inside
+the bundle.
 
-## Choices already made with packaging in mind
+## How it is built
 
-- The engine does not import Qt; the app is a separate package.
-- No runtime downloads and no network use: everything is local.
-- App data (maths channels, profiles, annotations, video links) goes to
-  `QStandardPaths.AppDataLocation`, not into the bundle or the repository.
-- No dependency on a system FFmpeg, ffprobe or a browser.
+| Step | What | Where |
+|---|---|---|
+| Bundle | PyInstaller, one-folder mode: the libraries stay ordinary files in `Contents/Frameworks` | `packaging/veltrix_data.spec`, `packaging/launch.py` |
+| Trim | asammdf's own viewer, the QML/Quick bindings and the QML plugin tree (which pulled in Qt 3D, Charts, Location…) are left out. Qt WebEngine stays: it prints the PDFs, and it links QtQml and QtQuick | the spec |
+| Sign | inner-most first: Qt WebEngine's helper (with Qt's own entitlements), every `.so` and `.dylib`, each framework, then the app; then `codesign --verify --deep --strict` | the build script |
+| Disk image | the app and an Applications link, UDZO | the build script |
 
-## Not decided or not checked
+| Setting | Effect |
+|---|---|
+| nothing | ad-hoc signature |
+| `VELTRIX_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)"` | signed with hardened runtime and a timestamp; `packaging/entitlements.plist` allows only unsigned executable memory (ctypes and libffi) |
+| `VELTRIX_NOTARY_PROFILE=<profile>` | also submitted with `notarytool`, then stapled to the disk image and the app, and checked with `spctl` |
+| `VELTRIX_BUILD_DIR=<folder>` | `dist/` and the working files go there (default: the project folder) |
 
-- Which bundler. None has been tried.
-- A Developer ID certificate is needed; none is on this machine.
-- The existing `Veltrix Data.app` (the workspace, and reports when several
-  files are dropped on it; it replaced Veltrix Report.app on 2026-10-20) is an
-  AppleScript launcher tied to this folder and its virtual environment; it is
-  not a distributable app.
-- Whether the bundle starts quickly from a signed, quarantined state.
+PyInstaller comes with the `package` extra: `uv pip install --python .venv ".[package]"`.
+
+### Checked on 2026-11-10
+
+- Three files dropped on the bundle (synthetic GT3 CSV, Monza AC CSV, the Spa `.ibt`): every report,
+  debrief, PDF and coaching card written. Each file's samples, laps, best lap and warnings are the same
+  as `veltrix reports` from the virtual environment gives, and so are the report pages, apart from the
+  PDF link.
+- Size: about 655 MB for the app. Most of it is Qt WebEngine (about 230 MB) and PyArrow (110 MB).
+
+### Found while building
+
+- An **empty folder `Versions/Resources`** in the virtual environment's
+  `QtWebEngineCore.framework` (not from the PySide6 wheel) made PyInstaller take it for the
+  framework's version. Qt WebEngine then could not find its helper process, and the app quit when it
+  came to print the first PDF. The build script removes empty folders of that kind before it builds.
+- Building with the working files on the USB drive was slow, and once stalled for good: a process hung
+  waiting on the drive and could not be stopped. `VELTRIX_BUILD_DIR` on the internal disk avoids it.
+
+## Licences
+
+| Part | Licence | How it ships |
+|---|---|---|
+| Python 3.12 | PSF | `Contents/Frameworks/Python.framework` |
+| NumPy, pandas, SciPy, PyArrow, h5py | BSD / Apache-2.0 | ordinary files in `Contents/Frameworks` |
+| PySide6 / Qt 6.12, with Qt Multimedia and Qt WebEngine | LGPL-3.0 | `Contents/Frameworks/PySide6`, replaceable |
+| FFmpeg inside Qt Multimedia | LGPL-2.1+ | inside PySide6's Qt |
+| asammdf, python-can | LGPL-3.0 | plain `.py` files in `Contents/Resources` (`module_collection_mode` "py" in the spec), not compiled into the archive, so replaceable |
+| pyqtgraph, libxrk | MIT | |
+
+**Still to do:** put the licence texts and a note on where the LGPL libraries live into
+`Contents/Resources` before the app is given to anyone else.
+
+## Not done yet
+
+- **Developer ID certificate.** There is none on this Mac (`security find-identity -v -p codesigning`
+  finds no identities). It needs a paid Apple Developer Program membership. With it, set
+  `VELTRIX_SIGN_IDENTITY`, store a notary profile once with
+  `xcrun notarytool store-credentials`, and set `VELTRIX_NOTARY_PROFILE`. The hardened-runtime build
+  has not been run, because it needs the certificate.
+- An app icon (it uses the default one).
+- Opening the quarantined disk image on a second Mac: that has to wait for notarisation.
+- Intel Macs: the build is arm64 only.

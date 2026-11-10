@@ -32,9 +32,11 @@ the user asks.
 
 **Next slices (no input needed):**
 
-1. Packaging: build, sign and notarise a real app bundle following
-   [packaging.md](packaging.md). `Veltrix Data.app` (one app since 2026-10-20)
-   is a launcher tied to this folder.
+1. Packaging: a self-contained app bundle is built and checked
+   (`tools/build_mac_bundle.sh`, 2026-11-10; see [packaging.md](packaging.md)).
+   It is signed ad hoc. **Waiting on the user:** a Developer ID certificate,
+   to sign with hardened runtime and notarise. Still to do without it: the
+   licence texts inside the bundle, an icon.
 2. Smaller leftovers: workspace file to hold lap rules and filters; the rule
    editor's "Found" column is off to the right on a narrow window; decide
    whether the older "What to work on" report tab stays; the import still

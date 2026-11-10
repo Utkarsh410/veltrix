@@ -812,9 +812,12 @@ def main(argv=None) -> int:
     app.setApplicationName("Veltrix Data")
     from veltrix_engine.logs import setup as setup_log
     from . import crash
+    from .file_open import FileOpenHandler
     setup_log()
     window = MainWindow()
     crash.install(window)
+    opened = FileOpenHandler(window, app)
+    app.installEventFilter(opened)
     window.show()
     if argv:
         window.open_file(argv[0])

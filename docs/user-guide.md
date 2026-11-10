@@ -8,7 +8,10 @@ in tests but have not been used on real data of that kind.
 it. This is the desktop app this guide describes. Drop several files on it
 instead and it writes their reports (see [Reports](#11-reports)) without
 opening them. The browser page from `veltrix workspace` is something else: it
-has no charts or maths editor.
+has no charts or maths editor. A self-contained copy of the app, for
+/Applications, comes from `sh tools/build_mac_bundle.sh` (see
+[packaging](packaging.md)); it writes the reports of dropped files into
+`~/Library/Application Support/Veltrix Data/reports`.
 
 ```bash
 .venv/bin/pip install -e ".[ui,all]"     # once
@@ -262,7 +265,8 @@ of the layout still opens.
 opens it; **File ▸ Make reports for files…** (⇧⌘P) does it for files you pick,
 without opening them, and opens an index page linking every report. Dropping
 several files on Veltrix Data.app does the same, into `reports/` in the
-project folder; `veltrix reports FILE… --open` is the same from Terminal.
+project folder (the self-contained app: `reports` in its data folder);
+`veltrix reports FILE… --open` is the same from Terminal.
 Every one of them also writes the debrief (HTML, and an A4 PDF to print or
 send) and the coaching cards beside the report, and links them from the top
 of it (`veltrix report --documents` for one file). A document that can't be made
