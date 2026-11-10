@@ -15,6 +15,7 @@ MAT, CAN logs with a DBC); `veltrix formats` lists them.
   veltrix inspect session.csv --export out/
   veltrix report session.csv -o session.html
   veltrix batch season/ --report --engineer every file in a folder, with an index of them
+  veltrix reports a.ibt b.ld -o out/ --open   reports with their documents for several files
   veltrix library scan ~/Telemetry          the session library: see cli_library.py
   veltrix importer check my_importer:IMPORTER sample.mlg    a plug-in importer against the test kit
 
@@ -210,7 +211,36 @@ def batch(args) -> int:
                      cars_dir=cars_dir, dbc=args.dbc or None, thresholds=args.thresholds)
     index = write_index(rows, out_dir)
     failed = sum(r.status == "failed" for r in rows)
-    print(f"\n{len(rows) - failed} read, {failed} failed. Index: {index[1]}")
+    print(f"\n{len(rows) - failed} read, {failed} failed. Index: {index[2]}")
+    return 1 if failed else 0
+
+
+def reports(args) -> int:
+    """A report, debrief and coaching cards for each file named, and an index page linking them."""
+    import os
+    from .batch import run_batch, write_index
+    files = [Path(f) for f in args.files]
+    missing = [str(f) for f in files if not f.is_file()]
+    if missing:
+        raise ValueError("not found: " + ", ".join(missing))
+    root = Path(os.path.commonpath([f.resolve().parent for f in files]))
+    out_dir = Path(args.output or "reports")
+    app_data = None
+    if not args.no_app_data:
+        from .user_data import data_dir
+        app_data = Path(args.app_data or data_dir())
+
+    def progress(done, total, row):
+        state = "done" if row.status == "ok" else row.status if row.status == "duplicate" else f"FAILED — {row.error}"
+        print(f"  [{done}/{total}] {row.file}: {state}")
+    rows = run_batch(files, root=root, out_dir=out_dir, outputs=("report", "documents"), jobs=args.jobs,
+                     progress=progress, app_data=app_data, pdf=not args.no_pdf, thresholds=args.thresholds)
+    index = write_index(rows, out_dir)[2]
+    failed = sum(r.status == "failed" for r in rows)
+    print(f"{len(rows) - failed} report(s), {failed} failed. Index: {index}")
+    if args.open:
+        import webbrowser
+        webbrowser.open(index.resolve().as_uri())
     return 1 if failed else 0
 
 
@@ -664,6 +694,17 @@ def main(argv=None) -> int:
 
     from . import cli_library
     cli_library.add_parser(sub)
+
+    rp = sub.add_parser("reports", help="reports, debriefs and coaching cards for several files, with an index page")
+    rp.add_argument("files", nargs="+")
+    rp.add_argument("-o", "--output", metavar="DIR", help="where they go (default: ./reports)")
+    rp.add_argument("--no-pdf", action="store_true", help="no PDF of each debrief")
+    rp.add_argument("--open", action="store_true", help="open the index page in the browser when done")
+    rp.add_argument("--jobs", type=int, default=1, help="files read side by side")
+    rp.add_argument("--thresholds", metavar="FILE", help="JSON file overriding analysis thresholds")
+    rp.add_argument("--no-app-data", action="store_true", help="leave out the app's maths channels, event rules and notes")
+    rp.add_argument("--app-data", metavar="DIR", help="read those from this folder instead of the app's own")
+    rp.set_defaults(func=reports)
 
     im = sub.add_parser("importer", help="plug-in importers: list the installed ones, or check one with the test kit")
     im.add_argument("action", choices=("list", "check"))

@@ -33,8 +33,8 @@ the user asks.
 **Next slices (no input needed):**
 
 1. Packaging: build, sign and notarise a real app bundle following
-   [packaging.md](packaging.md). `Veltrix Data.app` and `Veltrix Report.app`
-   are launchers tied to this folder.
+   [packaging.md](packaging.md). `Veltrix Data.app` (one app since 2026-10-20)
+   is a launcher tied to this folder.
 2. Smaller leftovers: workspace file to hold lap rules and filters; the rule
    editor's "Found" column is off to the right on a narrow window; decide
    whether the older "What to work on" report tab stays; the import still
@@ -535,6 +535,16 @@ All four priorities (P0–P3) of the user's improvement list are done.
   File ▸ Make report… writes them too. A PDF adds about 3 s warm (the first one starts Qt's web engine).
 - README and the status table: the desktop app is used by hand on a real display (confirmed by the user).
 - Still command-line only: compare, batch, the session library, exports. Their views wait for a reference.
+
+## One app: Veltrix Report.app merged into Veltrix Data.app — 2026-10-20
+
+- `tools/build_mac_app.sh` builds only Veltrix Data.app: double-click opens the workspace, one dropped file
+  opens it, several dropped files run `veltrix reports … -o <folder>/reports --open`. The old Report app is
+  removed by the script.
+- `veltrix reports FILE…` (`--open`, `--no-pdf`, `--jobs`, app data by default): reports with their documents and
+  an index page. Batch gained the `documents` output, `app_data`, `pdf`, `cancel` and `index.html`.
+- Workspace: File ▸ Make reports for files… (⇧⌘P), `veltrix_app/reports.py` (progress dialog that can stop
+  between files; nothing is opened in the workspace).
 
 ## Open items carried forward
 

@@ -805,3 +805,24 @@ def test_a_report_made_from_the_app_or_the_command_line_carries_maths_events_and
     assert "sqrt(acc_lat^2 + acc_long^2)" in html and "Tail wind on the straight" in html
     assert cli_main(["report", str(LOGGER), "-o", str(target), "--no-app-data"]) == 0
     assert "Tail wind" not in target.read_text() and "from the app" not in capsys.readouterr().out
+
+
+def test_make_reports_for_files_writes_each_with_its_documents_and_an_index(qt, tmp_path, monkeypatch):
+    from PySide6 import QtGui
+    from veltrix_app.reports import make_reports
+    from veltrix_app.window import MainWindow
+    opened = []
+    monkeypatch.setattr(QtGui.QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+    w = MainWindow(tmp_path / "appdata" / "maths.json")
+    broken = tmp_path / "broken.ibt"
+    broken.write_bytes(b"\x02\x00\x00\x00" + b"\x00" * 300)
+    index = make_reports(w, [LOGGER, broken], tmp_path / "out", w.data_folder, pdf=False)
+    assert opened == [str(index)] and index.name == "index.html"
+    names = {p.name for p in (tmp_path / "out").rglob("*")}
+    assert {"logger_layout_3lap_20hz_report.html", "logger_layout_3lap_20hz_debrief.html",
+            "logger_layout_3lap_20hz_coaching.html"} <= names
+    page = index.read_text()
+    assert "broken.ibt" in page and "logger_layout_3lap_20hz_report.html" in page
+    assert "could not be read" in w.statusBar().currentMessage()
+    assert w.session is None                                  # nothing was opened in the workspace
+    w.close()

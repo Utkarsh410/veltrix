@@ -286,6 +286,8 @@ class MainWindow(SessionCharts, QtWidgets.QMainWindow):
         menus["File"].addSeparator()
         action("File", "Make report…", self.choose_report, "Ctrl+P", toolbar=False,
                tip="Write this session's report, with your maths channels, the events and your notes, and open it")
+        action("File", "Make reports for files…", self.choose_reports, "Ctrl+Shift+P", toolbar=False,
+               tip="A report, debrief and coaching cards for each file picked, without opening them, and an index page")
         bar.addSeparator()
         self.cancel = action("File", "Cancel loading", self.cancel_loading)
         self.cancel.setVisible(False)
@@ -318,6 +320,14 @@ class MainWindow(SessionCharts, QtWidgets.QMainWindow):
                                                         "Web page (*.html)")
         if path:
             self.make_report(path)
+
+    def choose_reports(self):
+        extensions = sorted({e for row in supported_formats() for e in row["extensions"].split()} | {".gz"})
+        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, "Make reports for these files", "", "Telemetry (" + " ".join(f"*{e}" for e in extensions) + ")")
+        if paths:
+            from .reports import make_reports
+            make_reports(self, paths, self.data_folder / "reports", self.data_folder)
 
     def make_report(self, path: str | Path, open_after: bool = True, documents: bool = True) -> Path | None:
         """Write the open session's report — its maths channels, the events

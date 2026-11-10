@@ -54,6 +54,8 @@ runs on Apple Silicon).
 
 - Which bundler. None has been tried.
 - A Developer ID certificate is needed; none is on this machine.
-- The existing `Veltrix Report.app` is an AppleScript launcher tied to this
-  folder and its virtual environment; it is not a distributable app.
+- The existing `Veltrix Data.app` (the workspace, and reports when several
+  files are dropped on it; it replaced Veltrix Report.app on 2026-10-20) is an
+  AppleScript launcher tied to this folder and its virtual environment; it is
+  not a distributable app.
 - Whether the bundle starts quickly from a signed, quarantined state.

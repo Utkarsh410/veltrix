@@ -126,15 +126,21 @@ wrong gets findings that say so, with the numbers that show it.
 ## Without Terminal (macOS)
 
 ```bash
-sh tools/build_mac_app.sh        # once; builds "Veltrix Report.app" in this folder
+sh tools/build_mac_app.sh        # once; builds "Veltrix Data.app" in this folder
 ```
 
-Drag **Veltrix Report.app** to the Dock or Desktop. Double-click it to pick
-telemetry files, or drop files of any supported format onto it. Each file's report is written to
-`reports/` and opens in the browser. Beside it go the debrief (HTML, and a PDF to print or send) and
-the coaching cards, linked from the top of the report. From Terminal the same is
-`veltrix report FILE --documents`. The app remembers where this folder is, so
-build it again if the folder moves.
+One app does both jobs. Drag **Veltrix Data.app** to the Dock or Desktop.
+
+| | |
+|---|---|
+| Double-click | opens the desktop workspace |
+| Drop one file on it | opens that session in the workspace |
+| Drop several files on it | writes a report of each into `reports/` in this folder — with its debrief (HTML, and a PDF to print or send) and coaching cards, linked from the top of the report — and opens an index page of them |
+
+In the workspace, **File ▸ Make report…** does the same for the open session and **File ▸ Make
+reports for files…** for files you pick. From Terminal: `veltrix report FILE --documents`, or
+`veltrix reports FILE… --open`. The app remembers where this folder is, so build it again if the
+folder moves. (It replaces the earlier Veltrix Report.app, which the build script removes.)
 
 ## Quick start
 
@@ -290,7 +296,7 @@ Foundation phase of the product plan:
 |---|---|
 | Audit of the existing toolkits | Done — [docs/AUDIT.md](docs/AUDIT.md) |
 | Canonical channel schema, units and sign conventions | Done — [docs/CHANNEL_SCHEMA.md](docs/CHANNEL_SCHEMA.md) |
-| Core calculations extracted and tested | Done — 491 tests |
+| Core calculations extracted and tested | Done — 493 tests |
 | Golden datasets with expected outputs | Done for synthetic and simulator data; **no real-car dataset yet** |
 | Tested on a full simulator session | Done — see below |
 | Lap detection, distance alignment, delta | Done |
