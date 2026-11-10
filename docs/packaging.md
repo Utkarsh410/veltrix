@@ -1,87 +1,143 @@
-# Packaging for macOS
+# Packaging and downloads
 
-`sh tools/build_mac_bundle.sh` builds a self-contained **Veltrix Data.app** and a disk image
-(`dist/Veltrix-Data-<version>.dmg`). The app carries its own Python 3.12 and every library, and does
-not depend on this folder or its virtual environment. Built and checked on this Mac on 2026-11-10;
-**it is signed ad hoc, so it opens only on this Mac**, until it is signed with a Developer ID
-certificate and notarised (below).
+Veltrix Data ships as two downloads, built by GitHub Actions (`.github/workflows/release.yml`) and
+published on the repository's GitHub Releases page:
+
+| Download | For | Built by |
+|---|---|---|
+| `Veltrix-Data-mac.dmg` | macOS 13 or later, Apple Silicon | `tools/build_mac_bundle.sh` |
+| `Veltrix-Data-Windows-Setup.exe` | Windows 10 or 11, 64-bit | `tools/build_windows.ps1` |
+
+Each carries its own Python 3.12 and every library, and does not depend on this folder. **Neither is
+signed for distribution yet** (decided 2026-11-10: unsigned to start). What users see:
+
+- **macOS:** the first open is blocked ("Apple could not verify 'Veltrix Data' is free of malware").
+  Open **System Settings ▸ Privacy & Security**, scroll down, click **Open Anyway** next to Veltrix
+  Data, and confirm. This is needed once per installed copy.
+- **Windows:** SmartScreen shows "Windows protected your PC". Click **More info ▸ Run anyway**. This
+  is needed once per downloaded file.
 
 `sh tools/build_mac_app.sh` still builds the small launcher that runs this folder's code, for
-development. Both are called Veltrix Data.app; the bundle is written to `dist/`, the launcher to the
-project folder.
+development.
 
-## What it does
+## Publishing a release
+
+1. Set the version in `pyproject.toml` (`version = "0.2.0"`), commit, and merge to `main`.
+2. Tag the commit and push the tag:
+   ```bash
+   git tag v0.2.0 && git push origin v0.2.0
+   ```
+3. The workflow builds both downloads, runs each built app on two sessions, and publishes a release
+   named "Veltrix Data 0.2.0" with both files and notes made from the commits. It refuses a tag that
+   does not match `pyproject.toml`.
+
+To check a build without publishing: **Actions ▸ release ▸ Run workflow**. The two files are kept on
+that run's page as artifacts.
+
+### Links for the website
+
+These always point at the newest release, so the buttons never need changing:
+
+```
+https://github.com/Utkarsh410/veltrix/releases/latest/download/Veltrix-Data-mac.dmg
+https://github.com/Utkarsh410/veltrix/releases/latest/download/Veltrix-Data-Windows-Setup.exe
+```
+
+Next to each button, the page should say which systems it is for (above), and link the steps for the
+macOS and Windows warnings, until the downloads are signed.
+
+## What the app does
 
 | | |
 |---|---|
-| Double-click | opens the desktop workspace |
-| Drop one file on it (or Open With) | opens that session in the workspace |
-| Drop several files on it | the workspace opens and writes a report of each, with its debrief (HTML and PDF) and coaching cards, into `~/Library/Application Support/Veltrix Data/reports`, and opens an index page |
+| Open it | the desktop workspace |
+| Drop one file on it, or Open With | opens that session in the workspace |
+| Drop several files on it | the workspace opens and writes a report of each, with its debrief (HTML and PDF) and coaching cards, into the data folder's `reports`, and opens an index page |
 
-macOS hands dropped files to a bundled app as open events, not arguments: `veltrix_app/file_open.py`
-gathers them for 0.4 s and treats them as a group. The launcher passed them as arguments to `veltrix
-app` and `veltrix reports`, and wrote reports into `reports/` in the project folder instead.
+macOS hands dropped files to an app as open events; Windows passes them as arguments.
+`veltrix_app/file_open.py` gathers either kind for 0.4 s and handles them as a group.
 
-The app offers itself (`LSHandlerRank` Alternate) for every extension the engine reads, without
-becoming the default app for `.csv`, `.txt` or `.log`. The command line (`veltrix …`) is not inside
-the bundle.
+| | Data folder | Program |
+|---|---|---|
+| macOS | `~/Library/Application Support/Veltrix Data` | wherever the app is copied, usually /Applications |
+| Windows | `%APPDATA%\Veltrix Data` | `%LOCALAPPDATA%\Programs\Veltrix Data` (for one user, no administrator needed), or Program Files if the user installs for all users |
+
+Both offer the app for every file type the engine reads (Finder's and Explorer's Open With) without
+becoming the default app for `.csv`, `.txt` or `.log`. The command line (`veltrix …`) is not in
+either download.
 
 ## How it is built
 
 | Step | What | Where |
 |---|---|---|
-| Bundle | PyInstaller, one-folder mode: the libraries stay ordinary files in `Contents/Frameworks` | `packaging/veltrix_data.spec`, `packaging/launch.py` |
+| Bundle | PyInstaller, one-folder mode, the same spec on both systems: the libraries stay ordinary files | `packaging/veltrix_data.spec`, `packaging/launch.py` |
 | Trim | asammdf's own viewer, the QML/Quick bindings and the QML plugin tree (which pulled in Qt 3D, Charts, Location…) are left out. Qt WebEngine stays: it prints the PDFs, and it links QtQml and QtQuick | the spec |
-| Sign | inner-most first: Qt WebEngine's helper (with Qt's own entitlements), every `.so` and `.dylib`, each framework, then the app; then `codesign --verify --deep --strict` | the build script |
-| Disk image | the app and an Applications link, UDZO | the build script |
+| Licences | Veltrix Data's licence, `THIRD-PARTY-NOTICES.txt` and every bundled package's licence files, in a `licences` folder inside the app; beside the app in the disk image; shown before installing on Windows | `tools/collect_licences.py`, `packaging/EULA.txt`, `packaging/licences/` |
+| macOS: sign | inner-most first: Qt WebEngine's helper (with Qt's own entitlements), every `.so` and `.dylib`, each framework, then the app; then `codesign --verify --deep --strict` | `tools/build_mac_bundle.sh` |
+| macOS: disk image | the app, an Applications link, LICENSE.txt and THIRD-PARTY-NOTICES.txt, UDZO | `tools/build_mac_bundle.sh` |
+| Windows: installer | Inno Setup 6: a per-user install, the licence page, a Start-menu entry (and a desktop one if chosen), Open With for the telemetry types, an uninstaller | `tools/build_windows.ps1`, `packaging/windows_installer.iss` |
+| Check | runs the built app on two sessions and fails unless every report, debrief, PDF and coaching card is written | `tools/smoke_test_bundle.py` |
+
+macOS build settings:
 
 | Setting | Effect |
 |---|---|
-| nothing | ad-hoc signature |
+| nothing | ad-hoc signature (what releases use today) |
 | `VELTRIX_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)"` | signed with hardened runtime and a timestamp; `packaging/entitlements.plist` allows only unsigned executable memory (ctypes and libffi) |
 | `VELTRIX_NOTARY_PROFILE=<profile>` | also submitted with `notarytool`, then stapled to the disk image and the app, and checked with `spctl` |
 | `VELTRIX_BUILD_DIR=<folder>` | `dist/` and the working files go there (default: the project folder) |
+| `PYTHON=<python>` | the Python to build with (default: this folder's `.venv`) |
 
-PyInstaller comes with the `package` extra: `uv pip install --python .venv ".[package]"`.
+Building by hand: `uv pip install --python .venv ".[package]"` (PyInstaller), then the script for the
+system you are on. Windows also needs Inno Setup 6; neither system can build the other's download.
 
-### Checked on 2026-11-10
+### Checked
 
-- Three files dropped on the bundle (synthetic GT3 CSV, Monza AC CSV, the Spa `.ibt`): every report,
-  debrief, PDF and coaching card written. Each file's samples, laps, best lap and warnings are the same
-  as `veltrix reports` from the virtual environment gives, and so are the report pages, apart from the
-  PDF link.
-- Size: about 655 MB for the app. Most of it is Qt WebEngine (about 230 MB) and PyArrow (110 MB).
+- **macOS, 2026-11-10, on this Mac:** three files dropped on the app (synthetic GT3 CSV, Monza AC
+  CSV, the Spa `.ibt`). Every report, debrief, PDF and coaching card was written, and each file's
+  samples, laps, best lap and warnings are the same as `veltrix reports` from the virtual
+  environment gives. Size: about 657 MB for the app and 278 MB for the disk image; most of it is Qt
+  WebEngine (about 230 MB) and PyArrow (110 MB).
+- **Windows: not yet run.** It has never been built or run on Windows. The first run of the
+  workflow (and of the tests on `windows-latest`) is the first check.
 
 ### Found while building
 
-- An **empty folder `Versions/Resources`** in the virtual environment's
-  `QtWebEngineCore.framework` (not from the PySide6 wheel) made PyInstaller take it for the
-  framework's version. Qt WebEngine then could not find its helper process, and the app quit when it
-  came to print the first PDF. The build script removes empty folders of that kind before it builds.
-- Building with the working files on the USB drive was slow, and once stalled for good: a process hung
-  waiting on the drive and could not be stopped. `VELTRIX_BUILD_DIR` on the internal disk avoids it.
+- An **empty folder `Versions/Resources`** in the virtual environment's `QtWebEngineCore.framework`
+  (not from the PySide6 wheel) made PyInstaller take it for the framework's version. Qt WebEngine
+  then could not find its helper process, and the app quit when it came to print the first PDF. The
+  build script removes empty folders of that kind before it builds.
+- Building with the working files on the USB drive was slow, and once stalled for good: a process
+  hung waiting on the drive and could not be stopped. `VELTRIX_BUILD_DIR` on the internal disk avoids
+  it.
+- The tests workflow had been cancelled on every push since 2026-10-20: GitHub retired the
+  `macos-14` runner it named. Both workflows now use `macos-latest` and `windows-latest`.
 
 ## Licences
 
+Veltrix Data is proprietary (`LICENSE` for the source, `packaging/EULA.txt` for the app). The
+copyright holder is written as "Veltrix Motorsport"; replace it with the business's legal name if that
+is different, and have the EULA reviewed before a wide release.
+
 | Part | Licence | How it ships |
 |---|---|---|
-| Python 3.12 | PSF | `Contents/Frameworks/Python.framework` |
-| NumPy, pandas, SciPy, PyArrow, h5py | BSD / Apache-2.0 | ordinary files in `Contents/Frameworks` |
-| PySide6 / Qt 6.12, with Qt Multimedia and Qt WebEngine | LGPL-3.0 | `Contents/Frameworks/PySide6`, replaceable |
-| FFmpeg inside Qt Multimedia | LGPL-2.1+ | inside PySide6's Qt |
-| asammdf, python-can | LGPL-3.0 | plain `.py` files in `Contents/Resources` (`module_collection_mode` "py" in the spec), not compiled into the archive, so replaceable |
-| pyqtgraph, libxrk | MIT | |
+| Python 3.12 | PSF-2.0 | the framework (macOS) or `python312.dll` (Windows) |
+| NumPy, pandas, SciPy, PyArrow, h5py and the smaller packages | BSD / MIT / Apache-2.0 | ordinary files |
+| PySide6 / Qt 6.12, with Qt Multimedia and Qt WebEngine | LGPL-3.0 | ordinary files, replaceable |
+| FFmpeg inside Qt Multimedia | LGPL-2.1+ | inside Qt |
+| asammdf, python-can | LGPL-3.0 | plain `.py` files (`module_collection_mode` "py" in the spec), not compiled into the archive, so replaceable |
 
-**Still to do:** put the licence texts and a note on where the LGPL libraries live into
-`Contents/Resources` before the app is given to anyone else.
+`THIRD-PARTY-NOTICES.txt` lists every bundled package with its version and licence, says where the
+LGPL libraries are in the app and how to replace them, and points to the Chromium and Qt component
+lists for Qt WebEngine. PySide6 and Cython ship no licence file, so `packaging/licences/` holds the
+standard GNU and Apache texts (from gnu.org and apache.org). The EULA does not restrict modifying the
+LGPL libraries or reverse engineering to debug such changes, as LGPL-3.0 requires.
 
 ## Not done yet
 
-- **Developer ID certificate.** There is none on this Mac (`security find-identity -v -p codesigning`
-  finds no identities). It needs a paid Apple Developer Program membership. With it, set
-  `VELTRIX_SIGN_IDENTITY`, store a notary profile once with
-  `xcrun notarytool store-credentials`, and set `VELTRIX_NOTARY_PROFILE`. The hardened-runtime build
-  has not been run, because it needs the certificate.
-- An app icon (it uses the default one).
-- Opening the quarantined disk image on a second Mac: that has to wait for notarisation.
-- Intel Macs: the build is arm64 only.
+- **Signing.** macOS: an Apple Developer Program membership ($99 a year) gives a Developer ID
+  certificate; add it and an App Store Connect key as repository secrets, and the macOS job sets
+  `VELTRIX_SIGN_IDENTITY` and `VELTRIX_NOTARY_PROFILE`. Windows: a code-signing certificate (for
+  example Azure Trusted Signing) and a `signtool` step after Inno Setup. Neither path has been run.
+- An app icon (both use PyInstaller's default).
+- Intel Macs: the macOS build is Apple Silicon only.

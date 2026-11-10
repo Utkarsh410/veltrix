@@ -142,17 +142,14 @@ reports for files…** for files you pick. From Terminal: `veltrix report FILE -
 `veltrix reports FILE… --open`. The app remembers where this folder is, so build it again if the
 folder moves. (It replaces the earlier Veltrix Report.app, which the build script removes.)
 
-### A self-contained app
+### Downloads (macOS and Windows)
 
-```bash
-uv pip install --python .venv ".[package]"   # once: PyInstaller
-sh tools/build_mac_bundle.sh                 # dist/Veltrix Data.app and dist/Veltrix-Data-0.1.0.dmg
-```
-
-This app carries its own Python and libraries, so it can go in /Applications and keeps working if
-this folder moves. It does the same three things; reports from dropped files go to
-`~/Library/Application Support/Veltrix Data/reports`. Without a Developer ID certificate it is signed
-ad hoc and opens only on this Mac. See [packaging](docs/packaging.md) for signing and notarising.
+Releases carry a macOS disk image (`Veltrix-Data-mac.dmg`, Apple Silicon) and a Windows installer
+(`Veltrix-Data-Windows-Setup.exe`), each with its own Python and libraries. Pushing a tag `v<version>`
+builds and publishes both (`.github/workflows/release.yml`). They are not signed yet, so macOS and
+Windows each ask the user once to allow the app. Reports from dropped files go to the data folder:
+`~/Library/Application Support/Veltrix Data/reports` or `%APPDATA%\Veltrix Data\reports`. See
+[packaging](docs/packaging.md) for releasing, the website links, building by hand and licences.
 
 ## Quick start
 

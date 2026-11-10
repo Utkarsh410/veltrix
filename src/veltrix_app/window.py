@@ -819,8 +819,7 @@ def main(argv=None) -> int:
     opened = FileOpenHandler(window, app)
     app.installEventFilter(opened)
     window.show()
-    if argv:
-        window.open_file(argv[0])
+    opened.add(argv)            # files given on the command line, or dropped on the .exe on Windows
     return app.exec()
 
 

@@ -217,13 +217,12 @@ def batch(args) -> int:
 
 def reports(args) -> int:
     """A report, debrief and coaching cards for each file named, and an index page linking them."""
-    import os
-    from .batch import run_batch, write_index
+    from .batch import common_folder, run_batch, write_index
     files = [Path(f) for f in args.files]
     missing = [str(f) for f in files if not f.is_file()]
     if missing:
         raise ValueError("not found: " + ", ".join(missing))
-    root = Path(os.path.commonpath([f.resolve().parent for f in files]))
+    root = common_folder(files)
     out_dir = Path(args.output or "reports")
     app_data = None
     if not args.no_app_data:

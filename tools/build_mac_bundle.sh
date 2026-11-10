@@ -4,6 +4,7 @@
 #
 #   sh tools/build_mac_bundle.sh
 #
+# PYTHON picks the Python with the app's packages and PyInstaller (default: this folder's .venv).
 # Writes dist/Veltrix Data.app and dist/Veltrix-Data-<version>.dmg. VELTRIX_BUILD_DIR puts dist/ and the
 # working files elsewhere — an internal disk builds faster than a USB drive, and has not stalled.
 #
@@ -16,20 +17,21 @@
 # tools/build_mac_app.sh still builds the small launcher that runs this folder's code, for development.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PY="$ROOT/.venv/bin/python"
+PY="${PYTHON:-$ROOT/.venv/bin/python}"
 BUILD="${VELTRIX_BUILD_DIR:-$ROOT}"
 DIST="$BUILD/dist"
 APP="$DIST/Veltrix Data.app"
-VERSION="$("$PY" -c 'import importlib.metadata as m; print(m.version("veltrix-engine"))')"
+VERSION="$("$PY" -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["project"]["version"])' "$ROOT/pyproject.toml")"
 DMG="$DIST/Veltrix-Data-$VERSION.dmg"
 IDENTITY="${VELTRIX_SIGN_IDENTITY:--}"
 ENTITLEMENTS="$ROOT/packaging/entitlements.plist"
 
-"$PY" -c 'import PyInstaller' 2>/dev/null || { echo "PyInstaller is missing: uv pip install --python .venv 'veltrix-engine[package]'"; exit 1; }
+"$PY" -c 'import PyInstaller' 2>/dev/null || { echo "PyInstaller is missing: uv pip install --python .venv '.[package]'"; exit 1; }
 
 # An empty folder beside Versions/A in a Qt framework makes PyInstaller take it for the framework's
 # version, and Qt WebEngine (which prints the PDFs) then cannot find its helper process.
-find "$ROOT/.venv/lib/python3.12/site-packages/PySide6/Qt/lib" -maxdepth 3 -path "*.framework/Versions/*" \
+QT_LIB="$("$PY" -c 'import os, PySide6; print(os.path.join(os.path.dirname(PySide6.__file__), "Qt", "lib"))')"
+find "$QT_LIB" -maxdepth 3 -path "*.framework/Versions/*" \
 	-type d -empty -print -delete | sed 's/^/Removed an empty framework folder: /'
 
 "$PY" -m PyInstaller --noconfirm --clean --log-level WARN \
@@ -52,6 +54,9 @@ rm -f "$DMG"
 STAGE="$(mktemp -d)"
 ditto "$APP" "$STAGE/Veltrix Data.app"
 ln -s /Applications "$STAGE/Applications"
+"$PY" "$ROOT/tools/collect_licences.py" "$STAGE/.licences" > /dev/null
+mv "$STAGE/.licences/LICENSE.txt" "$STAGE/.licences/THIRD-PARTY-NOTICES.txt" "$STAGE/"
+rm -rf "$STAGE/.licences"
 hdiutil create -quiet -volname "Veltrix Data $VERSION" -srcfolder "$STAGE" -format UDZO "$DMG"
 rm -rf "$STAGE"
 [ "$IDENTITY" = - ] || codesign --force --sign "$IDENTITY" --timestamp "$DMG"

@@ -1,0 +1,35 @@
+VELTRIX DATA — SOFTWARE LICENCE
+
+Copyright (c) 2026 Veltrix Motorsport. All rights reserved.
+
+By installing or using Veltrix Data ("the Software") you agree to these terms. If you do not
+agree, do not install or use it.
+
+1. Licence. You may download, install and use the Software free of charge, for your own
+   purposes, on any number of computers you own or control.
+
+2. Restrictions. You may not sell, rent, sublicense or redistribute the Software, or any part of
+   it, or publish modified copies of it, without written permission from Veltrix Motorsport.
+   Download it only from Veltrix Motorsport's website or its official release page.
+
+3. Third-party software. The Software includes open-source components, listed in
+   THIRD-PARTY-NOTICES.txt, each provided under its own licence. Nothing in these terms limits
+   your rights under those licences. In particular, you may modify and replace the LGPL libraries
+   the Software uses (Qt/PySide6, FFmpeg, asammdf, python-can), and reverse engineer the Software
+   only as far as needed to debug such modifications.
+
+4. Your data. The Software runs on your computer and does not send your files or results
+   anywhere. You are responsible for the data you load into it.
+
+5. No warranty. The Software is provided "as is", without warranty of any kind, express or
+   implied, including fitness for a particular purpose. Its analysis, findings and setup advice
+   are engineering aids that may be wrong; they are not a substitute for your own judgement, and
+   must not be relied on for safety-critical decisions about a vehicle or its driver.
+
+6. Limitation of liability. To the extent the law allows, Veltrix Motorsport is not liable for
+   any damages arising from use of, or inability to use, the Software.
+
+7. Ending. This licence ends automatically if you break these terms; you must then delete the
+   Software.
+
+8. Ownership. Veltrix Motorsport keeps all rights in the Software not expressly granted here.

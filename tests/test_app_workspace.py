@@ -849,4 +849,10 @@ def test_files_opened_on_the_app_icon_open_one_or_make_reports_of_several(qt, tm
     drop(LOGGER, tmp_path / "b.csv", LOGGER)
     assert made == [([str(LOGGER), str(tmp_path / "b.csv")], w.data_folder / "reports")]
     assert not handler.eventFilter(qt, QtCore.QEvent(QtCore.QEvent.Type.Show))
+    handler.add([])                                  # Windows: the files come as arguments
+    assert not handler.timer.isActive()
+    handler.add([tmp_path / "c.csv", tmp_path / "d.csv"])
+    assert handler.timer.isActive()
+    handler.flush()
+    assert made[-1][0] == [str(tmp_path / "c.csv"), str(tmp_path / "d.csv")]
     w.close()

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from veltrix_engine.batch import run_batch, write_index
+from veltrix_engine.batch import common_folder, run_batch, write_index
 
 
 def make_reports(parent, files, out_dir, data_folder=None, open_after: bool = True, pdf: bool = True) -> Path | None:
@@ -34,8 +34,7 @@ def make_reports(parent, files, out_dir, data_folder=None, open_after: bool = Tr
     def cancel():
         QtWidgets.QApplication.processEvents()
         return dialog.wasCanceled()
-    import os
-    root = Path(os.path.commonpath([f.resolve().parent for f in files]))
+    root = common_folder(files)
     rows = run_batch(files, root=root, out_dir=out_dir, outputs=("report", "documents"), progress=progress,
                      app_data=data_folder, pdf=pdf, cancel=cancel)
     dialog.close()

@@ -32,11 +32,14 @@ the user asks.
 
 **Next slices (no input needed):**
 
-1. Packaging: a self-contained app bundle is built and checked
-   (`tools/build_mac_bundle.sh`, 2026-11-10; see [packaging.md](packaging.md)).
-   It is signed ad hoc. **Waiting on the user:** a Developer ID certificate,
-   to sign with hardened runtime and notarise. Still to do without it: the
-   licence texts inside the bundle, an icon.
+1. Packaging (2026-11-10, see [packaging.md](packaging.md)): downloads for
+   the website, a macOS `.dmg` and a Windows `.exe` installer, built and
+   published by `.github/workflows/release.yml` on a `v*` tag, with the
+   licence, EULA and third-party notices inside. Unsigned for now (the
+   user's choice). The macOS app is built and checked on this Mac; **the
+   Windows build and the Windows tests have not run yet** — their first CI
+   run is the first check. Still to do: an icon; signing when the user has
+   the certificates.
 2. Smaller leftovers: workspace file to hold lap rules and filters; the rule
    editor's "Found" column is off to the right on a narrow window; decide
    whether the older "What to work on" report tab stays; the import still

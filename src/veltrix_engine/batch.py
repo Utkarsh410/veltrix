@@ -85,6 +85,18 @@ def find_files(folder, recursive: bool = True) -> list:
     return found
 
 
+def common_folder(files) -> Path:
+    """The folder the files share. Files on different drives (Windows) share
+    none: then the first file's folder, and the others are shown by name."""
+    parents = [Path(f).resolve().parent for f in files]
+    if not parents:
+        return Path(".")
+    try:
+        return Path(os.path.commonpath(parents))
+    except ValueError:
+        return parents[0]
+
+
 def _output_stem(path: Path, root: Path, out_dir: Path) -> Path:
     rel = path.relative_to(root) if path.is_relative_to(root) else Path(path.name)
     name = rel.name[:-3] if rel.name.lower().endswith(".gz") else rel.name
@@ -213,7 +225,7 @@ def run_batch(files, root=None, out_dir=None, outputs: tuple = (), jobs: int = 1
     if unknown:
         raise ValueError(f"unknown output(s) {unknown}: choose from {', '.join(OUTPUTS)}")
     if root is None:
-        root = Path(os.path.commonpath([f.resolve().parent for f in files])) if files else Path(".")
+        root = common_folder(files)
     root = Path(root).resolve()
     out_dir = Path(out_dir).resolve() if out_dir is not None else None
     options = {"cars_dir": str(cars_dir) if cars_dir else None, "dbc": dbc,
@@ -228,7 +240,8 @@ def run_batch(files, root=None, out_dir=None, outputs: tuple = (), jobs: int = 1
             rows[k] = BatchRow(file=f.name, status="failed", error=str(e))
             continue
         if sha in first_of:
-            rows[k] = BatchRow(file=str(f.resolve().relative_to(root)), status="duplicate", sha256=sha,
+            shown = f.resolve().relative_to(root) if f.resolve().is_relative_to(root) else f.name
+            rows[k] = BatchRow(file=str(shown), status="duplicate", sha256=sha,
                                error=f"same content as {files[first_of[sha]].name}")
         else:
             first_of[sha] = k
