@@ -5,9 +5,13 @@ in tests but have not been used on real data of that kind.
 
 **Without Terminal:** double-click **Veltrix Data.app** in the project folder
 (build it once with `sh tools/build_mac_app.sh`), or drop a telemetry file on
-it. This is the desktop app this guide describes. It is not the same as
-*Veltrix Report.app*, which only makes the HTML report, or the browser page
-from `veltrix workspace` — neither of those has the charts or the maths editor.
+it. This is the desktop app this guide describes. Drop several files on it
+instead and it writes their reports (see [Reports](#11-reports)) without
+opening them. The browser page from `veltrix workspace` is something else: it
+has no charts or maths editor. A self-contained copy of the app, for
+/Applications, comes from `sh tools/build_mac_bundle.sh` (see
+[packaging](packaging.md)); it writes the reports of dropped files into
+`~/Library/Application Support/Veltrix Data/reports`.
 
 ```bash
 .venv/bin/pip install -e ".[ui,all]"     # once
@@ -253,11 +257,21 @@ of the layout still opens.
 
 ```bash
 .venv/bin/veltrix report path/to/session.csv -o session.html
+.venv/bin/veltrix report path/to/session.csv -o session_report.html --documents   # with the debrief and coaching cards
 .venv/bin/veltrix engineer path/to/session.csv --markdown report.md
 ```
 
 **File ▸ Make report…** (⌘P) in the app writes the open session's report and
-opens it. Either way the report includes your maths channels, the events found
+opens it; **File ▸ Make reports for files…** (⇧⌘P) does it for files you pick,
+without opening them, and opens an index page linking every report. Dropping
+several files on Veltrix Data.app does the same, into `reports/` in the
+project folder (the self-contained app: `reports` in its data folder);
+`veltrix reports FILE… --open` is the same from Terminal.
+Every one of them also writes the debrief (HTML, and an A4 PDF to print or
+send) and the coaching cards beside the report, and links them from the top
+of it (`veltrix report --documents` for one file). A document that can't be made
+(coaching cards need enough laps for corners) is reported, and the report
+still comes. Either way the report includes your maths channels, the events found
 with your rules, and your notes for that file (`--no-app-data` on the command
 line leaves them out).
 

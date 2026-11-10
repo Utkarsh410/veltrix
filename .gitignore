@@ -7,6 +7,8 @@ __pycache__/
 ._*
 reports/
 *.app/
+build/
+dist/
 ~$*
 
 # real sessions and what they gave are the user's: kept on this machine

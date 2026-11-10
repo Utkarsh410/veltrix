@@ -68,8 +68,10 @@ The window has:
 - video beside the data: playing it moves the cursor, moving the cursor seeks it. Sync is a manual
   offset or a fit to anchors, with the residuals shown; a sync that has not been checked says so.
 
-It has been driven by tests offscreen, including a full walk-through on a 79-minute session, but
-and by hand on a real display; video only with a clip the tests encode themselves. See
+It is used by hand on a real display, and the tests also drive it offscreen, including a full
+walk-through on a 79-minute session. Video has only been tried with a clip the tests encode
+themselves. Coaching cards, comparisons, documents, exports, batch mode and the session library are
+command-line features so far (see below); the app's views for them wait for a reference layout. See
 [docs/implementation-roadmap.md](docs/implementation-roadmap.md).
 
 ## Workspace (browser)
@@ -124,13 +126,30 @@ wrong gets findings that say so, with the numbers that show it.
 ## Without Terminal (macOS)
 
 ```bash
-sh tools/build_mac_app.sh        # once; builds "Veltrix Report.app" in this folder
+sh tools/build_mac_app.sh        # once; builds "Veltrix Data.app" in this folder
 ```
 
-Drag **Veltrix Report.app** to the Dock or Desktop. Double-click it to pick
-telemetry files, or drop files of any supported format onto it. Each file's report is written to
-`reports/` and opens in the browser. The app remembers where this folder is, so
-build it again if the folder moves.
+One app does both jobs. Drag **Veltrix Data.app** to the Dock or Desktop.
+
+| | |
+|---|---|
+| Double-click | opens the desktop workspace |
+| Drop one file on it | opens that session in the workspace |
+| Drop several files on it | writes a report of each into `reports/` in this folder — with its debrief (HTML, and a PDF to print or send) and coaching cards, linked from the top of the report — and opens an index page of them |
+
+In the workspace, **File ▸ Make report…** does the same for the open session and **File ▸ Make
+reports for files…** for files you pick. From Terminal: `veltrix report FILE --documents`, or
+`veltrix reports FILE… --open`. The app remembers where this folder is, so build it again if the
+folder moves. (It replaces the earlier Veltrix Report.app, which the build script removes.)
+
+### Downloads (macOS and Windows)
+
+Releases carry a macOS disk image (`Veltrix-Data-mac.dmg`, Apple Silicon) and a Windows installer
+(`Veltrix-Data-Windows-Setup.exe`), each with its own Python and libraries. Pushing a tag `v<version>`
+builds and publishes both (`.github/workflows/release.yml`). They are not signed yet, so macOS and
+Windows each ask the user once to allow the app. Reports from dropped files go to the data folder:
+`~/Library/Application Support/Veltrix Data/reports` or `%APPDATA%\Veltrix Data\reports`. See
+[packaging](docs/packaging.md) for releasing, the website links, building by hand and licences.
 
 ## Quick start
 
@@ -286,7 +305,7 @@ Foundation phase of the product plan:
 |---|---|
 | Audit of the existing toolkits | Done — [docs/AUDIT.md](docs/AUDIT.md) |
 | Canonical channel schema, units and sign conventions | Done — [docs/CHANNEL_SCHEMA.md](docs/CHANNEL_SCHEMA.md) |
-| Core calculations extracted and tested | Done — 488 tests |
+| Core calculations extracted and tested | Done — 493 tests |
 | Golden datasets with expected outputs | Done for synthetic and simulator data; **no real-car dataset yet** |
 | Tested on a full simulator session | Done — see below |
 | Lap detection, distance alignment, delta | Done |

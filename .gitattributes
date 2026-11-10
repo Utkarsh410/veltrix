@@ -1,0 +1,5 @@
+# Test data is compared byte for byte (checksums, frozen outputs), so Git must not change its line
+# endings when it checks the repository out on Windows.
+datasets/** -text
+tests/fixtures/** -text
+tests/real_expected/** -text

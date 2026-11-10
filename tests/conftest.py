@@ -45,4 +45,4 @@ def monza(sessions):
 
 
 def expected(key: str) -> dict:
-    return json.loads((EXPECTED / (DATASETS[key].split(".csv")[0] + ".json")).read_text())
+    return json.loads((EXPECTED / (DATASETS[key].split(".csv")[0] + ".json")).read_text(encoding="utf-8"))

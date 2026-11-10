@@ -50,7 +50,7 @@ def test_a_review_keeps_the_event_as_first_detected_and_its_history(tmp_path):
     second = store.put("abc123", again, "rejected", "it was a kerb", "utkarsh")
     assert second["original"]["thresholds"]["parameters"] == {"lock_on": 12.0}, "the original detection is never overwritten"
     assert [h["verdict"] for h in second["history"]] == ["confirmed"] and second["note"] == "it was a kerb"
-    saved = json.loads((tmp_path / "reviews" / "abc123.json").read_text())
+    saved = json.loads((tmp_path / "reviews" / "abc123.json").read_text(encoding="utf-8"))
     assert len(saved["reviews"]) == 1
     with pytest.raises(ValueError):
         E.make_review(e, "maybe")

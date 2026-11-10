@@ -286,6 +286,8 @@ class MainWindow(SessionCharts, QtWidgets.QMainWindow):
         menus["File"].addSeparator()
         action("File", "Make report…", self.choose_report, "Ctrl+P", toolbar=False,
                tip="Write this session's report, with your maths channels, the events and your notes, and open it")
+        action("File", "Make reports for files…", self.choose_reports, "Ctrl+Shift+P", toolbar=False,
+               tip="A report, debrief and coaching cards for each file picked, without opening them, and an index page")
         bar.addSeparator()
         self.cancel = action("File", "Cancel loading", self.cancel_loading)
         self.cancel.setVisible(False)
@@ -319,22 +321,39 @@ class MainWindow(SessionCharts, QtWidgets.QMainWindow):
         if path:
             self.make_report(path)
 
-    def make_report(self, path: str | Path, open_after: bool = True) -> Path | None:
+    def choose_reports(self):
+        extensions = sorted({e for row in supported_formats() for e in row["extensions"].split()} | {".gz"})
+        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, "Make reports for these files", "", "Telemetry (" + " ".join(f"*{e}" for e in extensions) + ")")
+        if paths:
+            from .reports import make_reports
+            make_reports(self, paths, self.data_folder / "reports", self.data_folder)
+
+    def make_report(self, path: str | Path, open_after: bool = True, documents: bool = True) -> Path | None:
         """Write the open session's report — its maths channels, the events
-        found and your notes included — and open it in the browser."""
+        found and your notes included — and open it in the browser. Beside it
+        go the debrief (HTML and PDF) and the coaching cards, linked from the
+        report."""
         if self.session is None:
             return None
         from veltrix_engine import maths as maths_engine
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
             maths_engine.on_view(self.session, self.maths.results)      # so maths channels are in the lap comparison too
-            out = write_report(self.session, path)
+            path, links, problems = Path(path), [], []
+            if documents:
+                from veltrix_engine.report.documents import write_documents
+                stem = path.parent / (path.name[:-len("_report.html")] if path.name.endswith("_report.html") else path.stem)
+                written, problems = write_documents(self.session, stem)
+                links = [(label, p.name) for label, p in written]
+            out = write_report(self.session, path, links=links)
         except (ValueError, KeyError, OSError) as e:
             QtWidgets.QApplication.restoreOverrideCursor()
             QtWidgets.QMessageBox.warning(self, "Could not write the report", str(e))
             return None
         QtWidgets.QApplication.restoreOverrideCursor()
-        self.statusBar().showMessage(f"Report written to {out}")
+        self.statusBar().showMessage(f"Report written to {out}" + (f" with {len(links)} document(s)" if links else "")
+                                     + (f" — not made: {'; '.join(problems)}" if problems else ""))
         if open_after:
             QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(out)))
         return out
@@ -793,12 +812,14 @@ def main(argv=None) -> int:
     app.setApplicationName("Veltrix Data")
     from veltrix_engine.logs import setup as setup_log
     from . import crash
+    from .file_open import FileOpenHandler
     setup_log()
     window = MainWindow()
     crash.install(window)
+    opened = FileOpenHandler(window, app)
+    app.installEventFilter(opened)
     window.show()
-    if argv:
-        window.open_file(argv[0])
+    opened.add(argv)            # files given on the command line, or dropped on the .exe on Windows
     return app.exec()
 
 

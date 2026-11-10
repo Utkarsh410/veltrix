@@ -67,7 +67,7 @@ def test_bad_files_are_refused(tmp_path):
     bad = {"name": "x", "lap_length_m": 1000, "corners": [{"number": 1, "direction": "L", "start_m": 500, "end_m": 600},
                                                           {"number": 2, "direction": "R", "start_m": 100, "end_m": 200}]}
     p = tmp_path / "bad.json"
-    p.write_text(json.dumps(bad))
+    p.write_text(json.dumps(bad), encoding="utf-8")
     with pytest.raises(ValueError, match="order"):
         circuits.load(p)
     assert circuits.available(tmp_path) == []

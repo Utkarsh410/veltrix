@@ -94,7 +94,7 @@ def test_analysis_matches_frozen_outputs(sessions, key):
 
 
 def test_models_match_frozen_outputs():
-    exp = json.loads((EXPECTED / "models.json").read_text())
+    exp = json.loads((EXPECTED / "models.json").read_text(encoding="utf-8"))
     alpha, kappa = np.linspace(-14, 14, 57), np.linspace(-0.25, 0.25, 51)
     for axle, coeffs in (("front", pacejka.FRONT), ("rear", pacejka.REAR)):
         e = exp["pacejka"][axle]

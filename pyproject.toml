@@ -22,6 +22,7 @@ mat = ["h5py>=3.8"]
 can = ["python-can>=4.2"]
 ui = ["PySide6>=6.6", "pyqtgraph>=0.13"]            # the desktop app (veltrix_app)
 all = ["asammdf>=7.4", "libxrk>=0.13", "h5py>=3.8", "python-can>=4.2"]
+package = ["pyinstaller>=6.10"]                     # tools/build_mac_bundle.sh
 
 [tool.setuptools.packages.find]
 where = ["src"]

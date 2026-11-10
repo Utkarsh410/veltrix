@@ -176,7 +176,7 @@ def test_the_profile_that_fits_a_file_is_chosen_and_one_that_barely_fits_is_not(
     other = Profile("Kart", rules=[Rule("GPS_Speed", "speed"), Rule("RPM", "rpm"), Rule("vCar", "speed"), Rule("Lambda", "rpm")])
     for p in (team, same_columns, other):
         p.save(tmp_path / f"{p.name}.json")
-    (tmp_path / "broken.json").write_text("{not json")
+    (tmp_path / "broken.json").write_text("{not json", encoding="utf-8")
     chosen, why = best_profile(raw, tmp_path)
     assert chosen.name == "Team A GT3" and "4 of its 4 columns" in why and "header names its logger and car" in why
     assert best_profile(raw, [other]) == (None, "No saved profile fits this file: the closest, 'Kart', matches 1 of its 4 columns.")

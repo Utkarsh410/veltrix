@@ -50,12 +50,47 @@ def test_the_document_command_writes_html_a_spec_and_a_pdf(tmp_path, capsys):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         args += ["--pdf", str(pdf)]
     assert cli_main(args) == 0
-    page = html.read_text()
+    page = html.read_text(encoding="utf-8")
     assert "Stated: rear wing +1" in page and "Corner by corner" in page
-    assert json.loads(spec.read_text())["template"] == "comparison"
+    assert json.loads(spec.read_text(encoding="utf-8"))["template"] == "comparison"
     if pdf_mod.available():
         data = pdf.read_bytes()
         assert data.startswith(b"%PDF") and len(re.findall(rb"/Type\s*/Page[^s]", data)) >= 1
     again = tmp_path / "again.html"
     assert cli_main(["document", "--spec", str(spec), "-o", str(again)]) == 0
-    assert again.read_text() == page, "the saved spec builds the same document"
+    assert again.read_text(encoding="utf-8") == page, "the saved spec builds the same document"
+
+
+def test_the_report_command_writes_the_documents_beside_it_and_links_them(tmp_path, capsys):
+    from veltrix_engine.cli import main
+    from veltrix_engine.report import pdf as pdf_mod
+    out = tmp_path / "reports" / "monza_report.html"
+    args = ["report", str(GOLDEN / "monza_ac_gt3.csv.gz"), "-o", str(out), "--documents", "--no-app-data"]
+    if not pdf_mod.available():
+        args.append("--no-pdf")
+    assert main(args) == 0
+    names = {p.name for p in out.parent.iterdir()}
+    assert {"monza_report.html", "monza_debrief.html", "monza_coaching.html"} <= names
+    page = out.read_text(encoding="utf-8")
+    assert '<a href="monza_debrief.html">Debrief</a>' in page and '<a href="monza_coaching.html">Coaching cards</a>' in page
+    if pdf_mod.available():
+        assert "monza_debrief.pdf" in names and '<a href="monza_debrief.pdf">' in page
+    assert "Documents:" in capsys.readouterr().out
+
+
+def test_a_report_without_documents_has_no_links(tmp_path):
+    from veltrix_engine import load_session
+    from veltrix_engine.report import render_report
+    page = render_report(load_session(GOLDEN / "monza_ac_gt3.csv.gz"))
+    assert 'class="docs"' not in page and "__LINKS__" not in page
+
+
+def test_a_document_that_cannot_be_made_does_not_stop_the_others(tmp_path, monkeypatch):
+    from veltrix_engine import load_session
+    from veltrix_engine.report import documents
+
+    def broken(session, title=None):
+        raise ValueError("too few laps for corners")
+    monkeypatch.setattr(documents, "driver_card_html", broken)
+    written, problems = documents.write_documents(load_session(GOLDEN / "monza_ac_gt3.csv.gz"), tmp_path / "m", pdf=False)
+    assert [label for label, _ in written] == ["Debrief"] and problems == ["Coaching cards: too few laps for corners"]

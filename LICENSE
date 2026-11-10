@@ -1,0 +1,13 @@
+Copyright (c) 2026 Veltrix Motorsport. All rights reserved.
+
+This repository is published so that it can be read. No licence is granted to copy, modify,
+distribute, sublicense or sell the source code or any part of it, or to use it to build other
+software, without written permission from Veltrix Motorsport.
+
+The Veltrix Data app built from it is licensed to its users under packaging/EULA.txt, which ships
+with every download.
+
+Third-party software that the app uses or ships (Qt/PySide6, NumPy, pandas, SciPy, PyArrow,
+asammdf, python-can and others) is not covered by this notice; each is used under its own
+licence, listed in THIRD-PARTY-NOTICES.txt inside every download (tools/collect_licences.py
+writes it).

@@ -1,0 +1,106 @@
+# Builds the downloads: the macOS disk image and the Windows installer, each checked by running
+# the built app on two sessions (tools/smoke_test_bundle.py).
+#
+#   Push a tag v<version> (the version in pyproject.toml) -> both are attached to a GitHub Release,
+#   at fixed names, so the website's buttons can always point at the latest:
+#     https://github.com/Utkarsh410/veltrix/releases/latest/download/Veltrix-Data-mac.dmg
+#     https://github.com/Utkarsh410/veltrix/releases/latest/download/Veltrix-Data-Windows-Setup.exe
+#   Run it by hand (Actions > release > Run workflow) -> the same builds, kept as run artifacts
+#   for testing; nothing is published.
+#
+# Neither is signed yet (see docs/packaging.md): macOS asks the user to allow the app in
+# System Settings > Privacy & Security, and Windows SmartScreen asks them to "Run anyway".
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  QT_QPA_PLATFORM: offscreen
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  mac:
+    runs-on: macos-latest                 # Apple Silicon (a pinned image, macos-14, was retired)
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install the app and PyInstaller
+        run: python -m pip install ".[ui,all,package]"
+      - name: Build the app and the disk image
+        env:
+          PYTHON: python
+          VELTRIX_BUILD_DIR: ${{ runner.temp }}/veltrix
+        run: sh tools/build_mac_bundle.sh
+      - name: Run the built app on two sessions
+        run: python tools/smoke_test_bundle.py "$RUNNER_TEMP/veltrix/dist/Veltrix Data.app/Contents/MacOS/Veltrix Data"
+      - name: Name the download
+        run: mv "$RUNNER_TEMP"/veltrix/dist/Veltrix-Data-*.dmg "$RUNNER_TEMP/Veltrix-Data-mac.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Veltrix-Data-mac
+          path: ${{ runner.temp }}/Veltrix-Data-mac.dmg
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install the app and PyInstaller
+        run: python -m pip install ".[ui,all,package]"
+      - name: Install Inno Setup if the runner lacks it
+        shell: pwsh
+        run: if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build the app and the installer
+        shell: pwsh
+        run: tools\build_windows.ps1 -Python python -BuildDir "$env:RUNNER_TEMP\veltrix"
+      - name: Run the built app on two sessions
+        shell: pwsh
+        run: python tools\smoke_test_bundle.py "$env:RUNNER_TEMP\veltrix\dist\Veltrix Data\Veltrix Data.exe"
+      - name: Name the download
+        shell: pwsh
+        run: Move-Item "$env:RUNNER_TEMP\veltrix\dist\Veltrix-Data-Setup-*.exe" "$env:RUNNER_TEMP\Veltrix-Data-Windows-Setup.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Veltrix-Data-Windows
+          path: ${{ runner.temp }}/Veltrix-Data-Windows-Setup.exe
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag must match the version in pyproject.toml
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME, but pyproject.toml says $version"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloads
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" downloads/Veltrix-Data-mac.dmg downloads/Veltrix-Data-Windows-Setup.exe \
+            --title "Veltrix Data ${GITHUB_REF_NAME#v}" --generate-notes

@@ -41,6 +41,8 @@ def data_dir() -> Path:
         return Path(override)
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "Veltrix Data"
+    if sys.platform == "win32":
+        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / "Veltrix Data"
     return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "veltrix-data"
 
 

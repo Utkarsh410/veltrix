@@ -39,19 +39,19 @@ def sources(package: str) -> list:
 
 
 def test_the_engine_never_imports_the_app():
-    bad = [(str(p.relative_to(SRC)), m) for p in sources("veltrix_engine") for m in imports(p)
-           if m.startswith("veltrix_app") and (str(p.relative_to(SRC)), m) not in ALLOWED]
+    bad = [(p.relative_to(SRC).as_posix(), m) for p in sources("veltrix_engine") for m in imports(p)
+           if m.startswith("veltrix_app") and (p.relative_to(SRC).as_posix(), m) not in ALLOWED]
     assert bad == [], f"engine modules importing the app: {bad}"
 
 
 def test_the_analysis_never_imports_the_report_or_the_command_line():
-    bad = [(str(p.relative_to(SRC)), m) for p in sources("veltrix_engine/analysis") for m in imports(p)
+    bad = [(p.relative_to(SRC).as_posix(), m) for p in sources("veltrix_engine/analysis") for m in imports(p)
            if m.startswith(("veltrix_engine.report", "veltrix_engine.cli"))]
     assert bad == [], f"analysis modules importing the report or the CLI: {bad}"
 
 
 @pytest.mark.parametrize("package", ["veltrix_engine", "veltrix_app"])
 def test_no_module_is_too_long(package):
-    long = {str(p.relative_to(SRC)): n for p in sources(package)
+    long = {p.relative_to(SRC).as_posix(): n for p in sources(package)
             if (n := len(p.read_text(encoding="utf-8").splitlines())) > MAX_LINES}
     assert long == {}, f"modules over {MAX_LINES} lines — split them: {long}"

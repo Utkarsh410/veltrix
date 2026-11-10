@@ -1,6 +1,6 @@
-# Every push and pull request runs the full test suite on macOS, the platform
-# the app is built for. The real sessions (pytest -m real) stay on the
-# developer's machine and are not run here.
+# Every push and pull request runs the full test suite on macOS and Windows,
+# the platforms the app is built for. The real sessions (pytest -m real) stay on
+# the developer's machine and are not run here.
 name: tests
 
 on:
@@ -14,7 +14,11 @@ concurrency:
 
 jobs:
   test:
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]    # a pinned image (macos-14) was retired and cancelled every run
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
       QT_QPA_PLATFORM: offscreen
@@ -31,4 +35,4 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[ui,all,dev]"
       - name: Run the tests
-        run: python -m pytest -o faulthandler_timeout=600 -p no:cacheprovider
+        run: python -m pytest -rs -o faulthandler_timeout=600 -p no:cacheprovider

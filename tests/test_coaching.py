@@ -57,4 +57,4 @@ def test_a_corner_cut_is_never_the_pass_to_copy(synthetic):
 def test_the_coach_command(tmp_path, capsys):
     out = tmp_path / "cards.html"
     assert cli_main(["coach", str(GOLDEN / "synthetic_gt3_5lap.csv.gz"), "--html", str(out), "--no-app-data"]) == 0
-    assert "# Driver coaching" in capsys.readouterr().out and out.read_text().startswith("<!doctype html>")
+    assert "# Driver coaching" in capsys.readouterr().out and out.read_text(encoding="utf-8").startswith("<!doctype html>")

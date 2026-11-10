@@ -21,9 +21,9 @@ def folder(tmp_path):
     shutil.copy(GOLDEN / "synthetic_gt3_5lap.csv.gz", root / "round2" / "race.csv.gz")
     shutil.copy(GOLDEN / "logger_layout_3lap_20hz.csv", root / "round2" / "practice_again.csv")
     (root / "round2" / "broken.ibt").write_bytes(b"\x02\x00\x00\x00" + b"\x00" * 200)
-    (root / "notes.md").write_text("not telemetry")
-    (root / "car.dbc").write_text('VERSION ""\nBU_: ECU\n')
-    (root / ".hidden.csv").write_text("Time,Speed\n0,1\n")
+    (root / "notes.md").write_text("not telemetry", encoding="utf-8")
+    (root / "car.dbc").write_text('VERSION ""\nBU_: ECU\n', encoding="utf-8")
+    (root / ".hidden.csv").write_text("Time,Speed\n0,1\n", encoding="utf-8")
     return root
 
 
@@ -54,11 +54,13 @@ def test_a_batch_reads_every_file_and_a_bad_one_is_only_its_own_row(folder, tmp_
 
 def test_the_index_has_a_row_per_file(folder, tmp_path):
     rows = run_batch(find_files(folder), root=folder)
-    csv_path, md_path = write_index(rows, tmp_path / "out")
+    csv_path, md_path, html_path = write_index(rows, tmp_path / "out")
+    page = html_path.read_text(encoding="utf-8")
+    assert page.count("<tr class='ok'>") == 2 and "<tr class='failed'>" in page and "broken.ibt" in page
     table = list(csv.DictReader(open(csv_path, encoding="utf-8")))
     assert [r["status"] for r in table] == ["ok", "failed", "duplicate", "ok"]
     assert table[0]["venue"] == "Synthetic Circuit" and table[0]["laps"] == "3" and len(table[0]["sha256"]) == 64
-    assert "2 read, 1 failed, 1 duplicate(s)." in md_path.read_text()
+    assert "2 read, 1 failed, 1 duplicate(s)." in md_path.read_text(encoding="utf-8")
 
 
 def test_files_in_parallel_give_the_same_rows(folder):
@@ -77,7 +79,8 @@ def test_the_command_reports_and_fails_when_a_file_fails(folder, tmp_path, capsy
     code = main(["batch", str(folder), "-o", str(tmp_path / "out"), "--report", "--no-app-data"])
     printed = capsys.readouterr().out
     assert code == 1 and "4 file(s)" in printed and "FAILED" in printed and "3 read, 1 failed" in printed
-    assert (tmp_path / "out" / "index.md").exists() and (tmp_path / "out" / "practice_report.html").exists()
+    assert (tmp_path / "out" / "index.html").exists() and (tmp_path / "out" / "practice_report.html").exists()
+    assert "index.html" in printed
     (folder / "round2" / "broken.ibt").unlink()
     assert main(["batch", str(folder), "-o", str(tmp_path / "out2"), "--no-app-data"]) == 0
 
@@ -85,3 +88,18 @@ def test_the_command_reports_and_fails_when_a_file_fails(folder, tmp_path, capsy
 def test_the_command_says_so_when_a_folder_has_no_telemetry(tmp_path, capsys):
     assert main(["batch", str(tmp_path)]) == 1
     assert "No telemetry files" in capsys.readouterr().out
+
+
+def test_the_reports_command_writes_each_report_with_its_documents_and_an_index(tmp_path, capsys):
+    out = tmp_path / "reports"
+    files = [str(GOLDEN / "logger_layout_3lap_20hz.csv"), str(GOLDEN / "synthetic_gt3_5lap.csv.gz")]
+    assert main(["reports", *files, "-o", str(out), "--no-pdf", "--no-app-data"]) == 0
+    names = {p.name for p in out.iterdir()}
+    assert {"logger_layout_3lap_20hz_report.html", "logger_layout_3lap_20hz_debrief.html",
+            "synthetic_gt3_5lap_coaching.html", "index.html"} <= names
+    report = (out / "synthetic_gt3_5lap_report.html").read_text(encoding="utf-8")
+    assert '<a href="synthetic_gt3_5lap_debrief.html">Debrief</a>' in report
+    assert "2 report(s), 0 failed" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        main(["reports"])
+    assert main(["reports", str(tmp_path / "nope.csv")]) == 1

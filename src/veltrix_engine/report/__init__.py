@@ -288,13 +288,19 @@ def _plain(o):
     return o.item() if hasattr(o, "item") else str(o)
 
 
-def render_report(session, title: str | None = None, fragment: bool = False) -> str:
+def render_report(session, title: str | None = None, fragment: bool = False, links=()) -> str:
     """The report as an HTML string. fragment=True returns the page without the
-    <!doctype>/<head> wrapper, for hosts that add their own."""
+    <!doctype>/<head> wrapper, for hosts that add their own. links: [(label,
+    href)] shown under the title — the documents written beside the report."""
+    import html as _html
     data = report_data(session, title)
     payload = json.dumps(data, separators=(",", ":"), default=_plain).replace("</", "<\\/")
     safe_title = data["meta"]["title"].replace("&", "&amp;").replace("<", "&lt;")
-    page = _TEMPLATE.read_text(encoding="utf-8").replace("__TITLE__", safe_title).replace("__DATA__", payload)
+    nav = ('<nav class="docs" aria-label="Documents">' + "".join(
+        f'<a href="{_html.escape(str(href), quote=True)}">{_html.escape(label)}</a>' for label, href in links)
+        + "</nav>") if links else ""
+    page = (_TEMPLATE.read_text(encoding="utf-8").replace("__TITLE__", safe_title).replace("__LINKS__", nav)
+            .replace("__DATA__", payload))
     if fragment:
         return page
     return ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
@@ -303,9 +309,9 @@ def render_report(session, title: str | None = None, fragment: bool = False) -> 
             + page + "\n</body>\n</html>\n")
 
 
-def write_report(session, path: str | Path, title: str | None = None, fragment: bool = False) -> Path:
+def write_report(session, path: str | Path, title: str | None = None, fragment: bool = False, links=()) -> Path:
     """Write the report page. Returns the path written."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_report(session, title, fragment), encoding="utf-8")
+    path.write_text(render_report(session, title, fragment, links), encoding="utf-8")
     return path

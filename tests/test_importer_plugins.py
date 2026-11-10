@@ -65,7 +65,7 @@ def test_the_example_importer_passes_the_kit_unchanged(sample):
 
 
 def test_the_example_uses_only_the_public_interface():
-    source = (EXAMPLE / "veltrix_example_logger" / "__init__.py").read_text()
+    source = (EXAMPLE / "veltrix_example_logger" / "__init__.py").read_text(encoding="utf-8")
     engine_imports = [line.strip() for line in source.splitlines() if line.startswith(("from veltrix", "import veltrix"))]
     assert engine_imports == ["from veltrix_engine.importers import Importer, RawTable"]
 
@@ -90,7 +90,7 @@ def test_a_zipped_file_is_unpacked_for_the_importer(sample, tmp_path):
 def test_built_in_formats_are_untouched_by_a_plug_in(tmp_path):
     register(elg.IMPORTER)
     csv = tmp_path / "plain.csv"
-    csv.write_text("Time,Speed\n" + "\n".join(f"{t / 10},{100 + t}" for t in range(50)))
+    csv.write_text("Time,Speed\n" + "\n".join(f"{t / 10},{100 + t}" for t in range(50)), encoding="utf-8")
     assert detect_format(csv.name, csv.read_bytes()) == "csv"
 
 

@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -88,7 +89,7 @@ def test_a_workspace_reopens_and_survives_missing_channels(tmp_path, session):
     ws.zoom(80.0, 160.0)
     ws.set_cursor(120.5)
     path = ws.save(tmp_path / "ws.json")
-    assert json.loads(path.read_text())["version"] == 1
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 1
     back = Workspace.load(path, session.model)
     assert back.to_dict() == ws.to_dict() and back.missing() == ["NotLogged"]
     assert back.series("NotLogged", 500) is None and back.readout()[-1][1].how == "none"
@@ -96,7 +97,7 @@ def test_a_workspace_reopens_and_survives_missing_channels(tmp_path, session):
     moved = Workspace.load(path, other.model)
     assert len(moved.charts) == len(ws.charts), "the layout is kept"
     assert set(moved.missing()) >= {"acc_lat", "acc_long", "tyre_temp_fl_mid", "NotLogged"}
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     data["version"] = 99
     with pytest.raises(ValueError, match="newer release"):
         Workspace.from_dict(data)
@@ -769,7 +770,7 @@ def test_maths_editor_undo_and_redo(qt, tmp_path, session):
     ed.set_parameter("limit", 2.0)
     assert ed.undo() and ed.mset.parameters == {"limit": 1.0} and ed.parameters.item(0, 1).text() == "1"
     assert ed.delete_channel("CombinedG") and ed.undo() and "CombinedG" in ed.mset.channels, "a delete can be taken back"
-    assert __import__("json").loads((tmp_path / "maths.json").read_text())["channels"][0]["name"] == "CombinedG"
+    assert __import__("json").loads((tmp_path / "maths.json").read_text(encoding="utf-8"))["channels"][0]["name"] == "CombinedG"
     w.close()
 
 
@@ -790,16 +791,69 @@ def test_a_report_made_from_the_app_or_the_command_line_carries_maths_events_and
     w.set_cursor(100.0)
     w.add_annotation("Tail wind on the straight", "conditions")
     out = w.make_report(tmp_path / "from_app.html")
-    html = out.read_text()
-    assert opened == [str(out)] and "sqrt(acc_lat^2 + acc_long^2)" in html and "Tail wind on the straight" in html
+    html = out.read_text(encoding="utf-8")
+    assert [Path(u) for u in opened] == [out] and "sqrt(acc_lat^2 + acc_long^2)" in html and "Tail wind on the straight" in html
     assert "CombinedG" in s.frame(), "and the maths channel can be compared lap against lap in it"
+    assert (tmp_path / "from_app_debrief.html").exists() and (tmp_path / "from_app_coaching.html").exists()
+    assert '<a href="from_app_debrief.html">Debrief</a>' in html
     w.close()
 
     target = tmp_path / "from_cli.html"                     # the same file, later, from Terminal
     assert cli_main(["report", str(LOGGER), "-o", str(target), "--app-data", str(data)]) == 0
     said = capsys.readouterr().out
     assert "1 maths channel(s)" in said and "1 note(s) from the app" in said
-    html = target.read_text()
+    html = target.read_text(encoding="utf-8")
     assert "sqrt(acc_lat^2 + acc_long^2)" in html and "Tail wind on the straight" in html
     assert cli_main(["report", str(LOGGER), "-o", str(target), "--no-app-data"]) == 0
-    assert "Tail wind" not in target.read_text() and "from the app" not in capsys.readouterr().out
+    assert "Tail wind" not in target.read_text(encoding="utf-8") and "from the app" not in capsys.readouterr().out
+
+
+def test_make_reports_for_files_writes_each_with_its_documents_and_an_index(qt, tmp_path, monkeypatch):
+    from PySide6 import QtGui
+    from veltrix_app.reports import make_reports
+    from veltrix_app.window import MainWindow
+    opened = []
+    monkeypatch.setattr(QtGui.QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+    w = MainWindow(tmp_path / "appdata" / "maths.json")
+    broken = tmp_path / "broken.ibt"
+    broken.write_bytes(b"\x02\x00\x00\x00" + b"\x00" * 300)
+    index = make_reports(w, [LOGGER, broken], tmp_path / "out", w.data_folder, pdf=False)
+    assert [Path(u) for u in opened] == [index] and index.name == "index.html"
+    names = {p.name for p in (tmp_path / "out").rglob("*")}
+    assert {"logger_layout_3lap_20hz_report.html", "logger_layout_3lap_20hz_debrief.html",
+            "logger_layout_3lap_20hz_coaching.html"} <= names
+    page = index.read_text(encoding="utf-8")
+    assert "broken.ibt" in page and "logger_layout_3lap_20hz_report.html" in page
+    assert "could not be read" in w.statusBar().currentMessage()
+    assert w.session is None                                  # nothing was opened in the workspace
+    w.close()
+
+
+def test_files_opened_on_the_app_icon_open_one_or_make_reports_of_several(qt, tmp_path, monkeypatch):
+    from PySide6 import QtCore, QtGui
+    from veltrix_app import reports
+    from veltrix_app.file_open import FileOpenHandler
+    from veltrix_app.window import MainWindow
+    w = MainWindow(tmp_path / "maths.json")
+    handler = FileOpenHandler(w)
+    opened, made = [], []
+    monkeypatch.setattr(w, "open_file", opened.append)
+    monkeypatch.setattr(reports, "make_reports", lambda parent, files, out_dir, data_folder: made.append((files, out_dir)))
+
+    def drop(*paths):                               # what macOS sends: one open event per file
+        for p in paths:
+            assert handler.eventFilter(qt, QtGui.QFileOpenEvent(str(p)))
+        handler.flush()
+
+    drop(LOGGER)
+    assert opened == [str(LOGGER)] and not made
+    drop(LOGGER, tmp_path / "b.csv", LOGGER)
+    assert made == [([str(LOGGER), str(tmp_path / "b.csv")], w.data_folder / "reports")]
+    assert not handler.eventFilter(qt, QtCore.QEvent(QtCore.QEvent.Type.Show))
+    handler.add([])                                  # Windows: the files come as arguments
+    assert not handler.timer.isActive()
+    handler.add([tmp_path / "c.csv", tmp_path / "d.csv"])
+    assert handler.timer.isActive()
+    handler.flush()
+    assert made[-1][0] == [str(tmp_path / "c.csv"), str(tmp_path / "d.csv")]
+    w.close()
