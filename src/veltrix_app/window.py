@@ -810,6 +810,9 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(["Veltrix Data"])
     app.setApplicationName("Veltrix Data")
+    icon = Path(__file__).with_name("icon.png")
+    if icon.exists():           # window and taskbar icon (the bundles carry their own .icns / .ico)
+        app.setWindowIcon(QtGui.QIcon(str(icon)))
     from veltrix_engine.logs import setup as setup_log
     from . import crash
     from .file_open import FileOpenHandler

@@ -30,12 +30,16 @@ for optional in ("asammdf", "libxrk", "h5py", "can"):
 
 # This app's licence and every bundled package's, in a "licences" folder inside the app.
 licences = collect(Path(workpath) / "licences")
-datas = collect_data_files("veltrix_engine") + copy_metadata("veltrix-engine") + [(str(licences), "licences")]
+datas = (collect_data_files("veltrix_engine") + collect_data_files("veltrix_app") + copy_metadata("veltrix-engine")
+         + [(str(licences), "licences")])
 for name in ("asammdf", "libxrk"):
     try:
         datas += collect_data_files(name)
     except Exception:
         pass
+
+# App icon: .icns for the macOS bundle, .ico for the Windows exe (made by packaging/icons/make_icon.py).
+ICONS = ROOT / "packaging" / "icons"
 
 extensions = sorted({e.lstrip(".") for f in FORMATS for e in f.extensions} | {"gz"})
 
@@ -66,13 +70,14 @@ a.datas = [d for d in a.datas if not _qml(d)]
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="Veltrix Data",
           console=False, argv_emulation=False, target_arch="arm64" if MAC else None,
+          icon=None if MAC else str(ICONS / "veltrix-data.ico"),
           codesign_identity=None, entitlements_file=None)
 coll = COLLECT(exe, a.binaries, a.datas, name="Veltrix Data")
 if MAC:
     app = BUNDLE(
         coll,
         name="Veltrix Data.app",
-        icon=None,
+        icon=str(ICONS / "veltrix-data.icns"),
         bundle_identifier=BUNDLE_ID,
         version=VERSION,
         info_plist={

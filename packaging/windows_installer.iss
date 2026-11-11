@@ -27,6 +27,7 @@ LicenseFile={#BuildDir}\licences\LICENSE.txt
 OutputDir={#OutputDir}
 OutputBaseFilename=Veltrix-Data-Setup-{#AppVersion}
 UninstallDisplayIcon={app}\Veltrix Data.exe
+SetupIconFile=icons\veltrix-data.ico
 UninstallDisplayName=Veltrix Data
 Compression=lzma2/max
 SolidCompression=yes
