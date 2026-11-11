@@ -120,9 +120,15 @@ system you are on. Windows also needs Inno Setup 6; neither system can build the
 
 ## Licences
 
-Veltrix Data is proprietary (`LICENSE` for the source, `packaging/EULA.txt` for the app). The
-copyright holder is written as "Veltrix Motorsport"; replace it with the business's legal name if that
-is different, and have the EULA reviewed before a wide release.
+Veltrix Data is proprietary (`LICENSE` for the source, `packaging/EULA.txt` for the app).
+
+**Copyright holder** (decided 2026-11-11): "Utkarsh Chaudhari, trading as Veltrix Motorsport", until
+a UAE company is formed and the copyright is assigned to it in writing. The name is set once, as
+`[tool.veltrix] copyright` in `pyproject.toml`. The EULA shipped in each download, the macOS app's
+copyright line and the Windows installer read it from there; `LICENSE` in the repository is edited by
+hand. In the EULA, "Veltrix Motorsport" is defined as that holder, so the terms need no other change.
+Have the EULA reviewed before a wide release. "Veltrix Motorsport" stays the brand: the publisher shown
+by Windows and the product name do not change with the holder.
 
 | Part | Licence | How it ships |
 |---|---|---|

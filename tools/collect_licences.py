@@ -1,7 +1,8 @@
 """
 The licence folder that ships inside the app and the installers:
 
-    LICENSE.txt                  Veltrix Data's own licence (packaging/EULA.txt)
+    LICENSE.txt                  Veltrix Data's own licence (packaging/EULA.txt, with the copyright
+                                 holder from [tool.veltrix] in pyproject.toml)
     THIRD-PARTY-NOTICES.txt      every bundled package: version, licence, where it is in the app
     licences/<package>/…         each package's own licence files, as it ships them
     licences/standard/…          standard texts (GNU, Apache) for packages that ship none
@@ -61,11 +62,17 @@ def _name(dist) -> str:
     return re.sub(r"[-_.]+", "-", dist.metadata["Name"]).lower()
 
 
+def copyright_holder() -> str:
+    """Who holds the copyright: [tool.veltrix] copyright in pyproject.toml."""
+    import tomllib
+    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["veltrix"]["copyright"]
+
+
 def _own_requirements(extras) -> list:
     """Veltrix Data's requirements with these extras, from pyproject.toml — the installed
     metadata of an editable install can predate the extras."""
     import tomllib
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     return project["dependencies"] + [r for e in extras for r in project["optional-dependencies"][e]]
 
 
@@ -109,7 +116,8 @@ def collect(out: Path) -> Path:
     if out.exists():
         shutil.rmtree(out)
     (out / "licences").mkdir(parents=True)
-    shutil.copy(ROOT / "packaging" / "EULA.txt", out / "LICENSE.txt")
+    eula = (ROOT / "packaging" / "EULA.txt").read_text(encoding="utf-8")
+    (out / "LICENSE.txt").write_text(eula.replace("{copyright}", copyright_holder()), encoding="utf-8")
     shutil.copytree(STANDARD, out / "licences" / "standard")
 
     rows, missing = [], []
