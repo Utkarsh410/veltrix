@@ -31,6 +31,7 @@ where = ["src"]
 "veltrix_engine.report" = ["template.html"]
 "veltrix_engine.workspace" = ["page.html"]
 "veltrix_engine" = ["tracks/*.json"]
+"veltrix_app" = ["icon.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
