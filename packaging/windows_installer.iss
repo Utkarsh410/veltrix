@@ -1,10 +1,13 @@
 ; Inno Setup script for the Windows installer, Veltrix-Data-Setup-<version>.exe.
 ; Built by tools/build_windows.ps1, which passes the version and the folders:
-;   iscc /DAppVersion=0.1.0 /DSourceDir=…\dist\Veltrix Data /DBuildDir=…\build /DOutputDir=…\dist windows_installer.iss
+;   iscc /DAppVersion=0.1.0 /DCopyright=… /DSourceDir=…\dist\Veltrix Data /DBuildDir=…\build /DOutputDir=…\dist windows_installer.iss
 ; Installs for the current user (no administrator needed) unless the user picks all users.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
+#endif
+#ifndef Copyright
+  #define Copyright "Veltrix Motorsport"
 #endif
 
 [Setup]
@@ -14,7 +17,7 @@ AppName=Veltrix Data
 AppVersion={#AppVersion}
 AppVerName=Veltrix Data {#AppVersion}
 AppPublisher=Veltrix Motorsport
-AppCopyright=Copyright (c) 2026 Veltrix Motorsport. All rights reserved.
+AppCopyright=Copyright (c) 2026 {#Copyright}. All rights reserved.
 DefaultDirName={autopf}\Veltrix Data
 DefaultGroupName=Veltrix Data
 DisableProgramGroupPage=yes

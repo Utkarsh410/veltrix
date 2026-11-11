@@ -1,6 +1,8 @@
 VELTRIX DATA — SOFTWARE LICENCE
 
-Copyright (c) 2026 Veltrix Motorsport. All rights reserved.
+Copyright (c) 2026 {copyright}. All rights reserved.
+
+In these terms, "Veltrix Motorsport" means the copyright holder named above.
 
 By installing or using Veltrix Data ("the Software") you agree to these terms. If you do not
 agree, do not install or use it.

@@ -16,7 +16,9 @@ sys.path.insert(0, str(ROOT / "tools"))
 from veltrix_engine.importers import FORMATS  # noqa: E402
 from collect_licences import collect  # noqa: E402
 
-VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+PROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+VERSION = PROJECT["project"]["version"]
+COPYRIGHT = PROJECT["tool"]["veltrix"]["copyright"]
 BUNDLE_ID = "com.utkarsh410.veltrix-data"
 
 # Optional readers are imported only when a file needs them, so name them.
@@ -88,7 +90,7 @@ if MAC:
             "LSMinimumSystemVersion": "13.0",
             "NSHighResolutionCapable": True,
             "LSApplicationCategoryType": "public.app-category.developer-tools",
-            "NSHumanReadableCopyright": "Copyright © 2026 Veltrix Motorsport. All rights reserved.",
+            "NSHumanReadableCopyright": f"Copyright © 2026 {COPYRIGHT}. All rights reserved.",
             # Alternate: offered for these files and accepts drops, without taking
             # over .csv, .txt or .log from the apps that already open them.
             "CFBundleDocumentTypes": [{

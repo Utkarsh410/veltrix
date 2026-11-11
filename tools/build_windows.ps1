@@ -20,6 +20,7 @@ $Work = Join-Path $BuildDir "build"
 & $Python -c "import PyInstaller" 2>$null
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller is missing: $Python -m pip install -e "".[ui,all,package]""" }
 $Version = & $Python -c "import tomllib; print(tomllib.load(open(r'$Root\pyproject.toml','rb'))['project']['version'])"
+$Copyright = & $Python -c "import tomllib; print(tomllib.load(open(r'$Root\pyproject.toml','rb'))['tool']['veltrix']['copyright'])"
 
 $Iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
 if (-not $Iscc) { $Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
@@ -38,7 +39,7 @@ $Lines = foreach ($e in $Extensions.Split(" ")) {
 }
 Set-Content -Path (Join-Path $Work "extensions.iss") -Value $Lines -Encoding UTF8
 
-& $Iscc /Q "/DAppVersion=$Version" "/DSourceDir=$Dist\Veltrix Data" "/DBuildDir=$Work" "/DOutputDir=$Dist" `
+& $Iscc /Q "/DAppVersion=$Version" "/DCopyright=$Copyright" "/DSourceDir=$Dist\Veltrix Data" "/DBuildDir=$Work" "/DOutputDir=$Dist" `
     (Join-Path $Root "packaging\windows_installer.iss")
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 

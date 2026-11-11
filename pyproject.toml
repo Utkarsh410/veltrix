@@ -33,6 +33,11 @@ where = ["src"]
 "veltrix_engine" = ["tracks/*.json"]
 "veltrix_app" = ["icon.png"]
 
+[tool.veltrix]
+# Who holds the copyright: the EULA, the macOS app and the Windows installer all read it. When the
+# UAE company exists and the copyright has been assigned to it, change it here and in LICENSE.
+copyright = "Utkarsh Chaudhari, trading as Veltrix Motorsport"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q -m 'not real'"
